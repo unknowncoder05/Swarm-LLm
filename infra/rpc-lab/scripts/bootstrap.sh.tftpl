@@ -25,7 +25,7 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now swarm-expire.timer
 
-mkdir -p /opt/swarm /data /run/swarm
+mkdir -p /opt/swarm/schemas /data /run/swarm
 echo '${config_b64}' | base64 --decode >/opt/swarm/config.json
 config() { python3 -c 'import json,sys; print(json.load(open("/opt/swarm/config.json"))[sys.argv[1]])' "$1"; }
 role=$(config role)
@@ -42,7 +42,9 @@ if ! systemctl is-active --quiet amazon-ssm-agent && ! systemctl is-active --qui
   systemctl enable --now amazon-ssm-agent
 fi
 
-for artifact in agent.py coordinator.py relay_transport.py requirements.txt launch.py llama-wrapper.py smoke.py; do
+# The explicit manifest needs only GetObject; no bucket listing permission.
+for artifact in $(config artifacts); do
+  mkdir -p "/opt/swarm/$(dirname "$artifact")"
   aws s3 cp "s3://$(config bucket)/$(config revision)/$artifact" "/opt/swarm/$artifact" --region "$region" --only-show-errors
 done
 chmod 755 /opt/swarm/llama-wrapper.py

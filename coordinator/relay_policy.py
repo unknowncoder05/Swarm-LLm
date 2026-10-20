@@ -1,8 +1,14 @@
 """Route ordering and pair-specific failure cooldowns, independent of GPU startup."""
+
 from dataclasses import dataclass
 import json
 import time
 from urllib.parse import urlsplit
+
+try:
+    from validation import validate_contract
+except ModuleNotFoundError:
+    from coordinator.validation import validate_contract
 
 
 @dataclass(frozen=True)
@@ -21,8 +27,7 @@ class RelayPolicy:
         self.cloud_enabled = cloud_enabled
         self.failed = {}
         values = json.loads(raw)
-        if not isinstance(values, list) or len(values) > 16:
-            raise ValueError("RPC_RELAYS must be an array of at most 16 relay candidates")
+        validate_contract("relay-candidates", values)
         self.routes = []
         identities = {"lan-quic", "coordinator"}
         for item in values:
@@ -30,22 +35,36 @@ class RelayPolicy:
             parsed = urlsplit(item.get("url", ""))
             scope = item.get("scope", "local")
             allowed = item.get("agent_ids", [])
-            if (not identity or len(identity) > 64 or identity in identities or scope not in ("local", "cloud")
-                    or parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-                    or parsed.query or parsed.fragment or not item.get("control_key")
-                    or not isinstance(allowed, list) or len(allowed) > 64
-                    or any(not isinstance(a, str) or not a for a in allowed)):
-                raise ValueError("Invalid relay candidate; require unique ID, HTTPS URL and control key")
+            if (
+                identity in identities
+                or parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "Invalid relay candidate; require unique ID, HTTPS URL and control key"
+                )
             identities.add(identity)
             if scope == "cloud" and not cloud_enabled:
                 continue
-            self.routes.append(Route(identity, "relay", scope, item["url"].rstrip("/"),
-                                     item["control_key"], frozenset(allowed)))
+            self.routes.append(
+                Route(
+                    identity,
+                    "relay",
+                    scope,
+                    item["url"].rstrip("/"),
+                    item["control_key"],
+                    frozenset(allowed),
+                )
+            )
         self.routes.sort(key=lambda r: r.scope != "local")
 
     def candidates(self, agent_ids, quic=True, managed=False):
         members = frozenset(agent_ids)
-        routes = ([Route("lan-quic", "quic", "local")] if quic else [])
+        routes = [Route("lan-quic", "quic", "local")] if quic else []
         routes += [r for r in self.routes if not r.agent_ids or members <= r.agent_ids]
         if managed and self.cloud_enabled:
             routes.append(Route("managed-relay", "relay", "cloud"))

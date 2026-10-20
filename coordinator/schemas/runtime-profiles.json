@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "maxProperties": 16,
+  "propertyNames": {
+    "minLength": 1,
+    "maxLength": 200
+  },
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "batch_size": {
+        "type": "integer",
+        "enum": [
+          128,
+          256,
+          512
+        ]
+      },
+      "ubatch_size": {
+        "type": "integer",
+        "enum": [
+          64,
+          128,
+          256
+        ]
+      },
+      "cache_ram": {
+        "type": "integer",
+        "enum": [
+          0,
+          1024,
+          4096,
+          8192
+        ]
+      }
+    }
+  }
+}

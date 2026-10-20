@@ -5,7 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY coordinator.py relay_transport.py chat_admission.py relay_client.py quic_control.py rpc_handoff.py relay_policy.py rpc_performance.py chat_stream.py .
+COPY *.py ./
+COPY schemas/ ./schemas/
 
 EXPOSE 8080
 

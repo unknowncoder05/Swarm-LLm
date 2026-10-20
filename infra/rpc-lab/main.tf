@@ -66,17 +66,20 @@ locals {
     ]
   ]))) : var.spot_max_price
   az = coalesce(var.availability_zone, data.aws_availability_zones.available.names[0])
-  files = {
-    "agent.py"           = var.agent_source_path == null ? "${path.module}/snapshots/agent.py" : var.agent_source_path
-    "coordinator.py"     = "${path.module}/../../coordinator/coordinator.py"
-    "relay_transport.py" = "${path.module}/../../coordinator/relay_transport.py"
-    "requirements.txt"   = "${path.module}/../../coordinator/requirements.txt"
-    "launch.py"          = "${path.module}/scripts/launch.py"
-    "llama-wrapper.py"   = "${path.module}/scripts/llama-wrapper.py"
-    "smoke.py"           = "${path.module}/scripts/smoke.py"
-  }
+  # Include all runtime modules and JSON contracts as the coordinator evolves.
+  files = merge({
+    for name in setunion(fileset("${path.module}/../../coordinator", "*.py"), fileset("${path.module}/../../coordinator", "schemas/*.json")) :
+    name => "${path.module}/../../coordinator/${name}"
+    }, {
+    "agent.py"         = var.agent_source_path == null ? "${path.module}/snapshots/agent.py" : var.agent_source_path
+    "requirements.txt" = "${path.module}/../../coordinator/requirements.txt"
+    "launch.py"        = "${path.module}/scripts/launch.py"
+    "llama-wrapper.py" = "${path.module}/scripts/llama-wrapper.py"
+    "smoke.py"         = "${path.module}/scripts/smoke.py"
+  })
   revision = sha256(join("", [for name in sort(keys(local.files)) : filesha256(local.files[name])]))
   shared_config = {
+    artifacts         = join(" ", sort(keys(local.files)))
     region            = var.region
     bucket            = aws_s3_bucket.bundle.id
     revision          = local.revision

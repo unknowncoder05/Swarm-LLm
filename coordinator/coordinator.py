@@ -18,36 +18,29 @@ connects to agents. Works through NAT/restricted firewalls.
 Security measures:
   - Three-key auth with constant-time comparison (no timing attacks)
   - Source IP derived from X-Real-IP set by nginx, never from payload
-  - Rate limiting: consumer 60 req/min, registration 5 per 5 min (per IP)
+  - Rate limiting: consumer 60 req/min, registration 30 per 5 min (per IP)
   - Internal machine addresses never exposed in error responses
   - CORS configured for browser clients
 """
 
 import asyncio
 import base64
-import hmac
 import json
 import os
 import secrets
-import sqlite3
-import statistics
 import time
 import uuid
 import re
 import urllib.request
 from urllib.parse import urlsplit
 from pathlib import Path
-from collections import defaultdict, deque, OrderedDict
-from itertools import combinations
-from datetime import datetime, timezone
+from collections import defaultdict, OrderedDict
 from typing import Any, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Security
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi.security.api_key import APIKeyHeader
-from pydantic import BaseModel, Field
 
 try:
     from chat_admission import InvalidChatRequest, prepare_chat_request
@@ -71,7 +64,39 @@ try:
 except ModuleNotFoundError:
     from coordinator.chat_stream import StreamBuffer, install_stream_routes, sse
 
+try:
+    from api_models import (
+        AgentStatusPayload, ContainerJobCreate, ContainerJobResult, HeartbeatPayload,
+        ImageGenerationRequest, JobResultPayload, RegisterPayload, RpcLogPayload,
+        RpcPreflightPayload, RpcReadyPayload, VideoGenerationRequest, _validate_container_job,
+    )
+    from models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
+    from persistence import CoordinatorRepository, _container_job_dict
+    from security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
+    from catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS
+    from validation import validate_contract
+    from placement import PlacementPolicy, _physical_host
+    from admin_api import install_admin_routes
+except ModuleNotFoundError:
+    from coordinator.api_models import (
+        AgentStatusPayload, ContainerJobCreate, ContainerJobResult, HeartbeatPayload,
+        ImageGenerationRequest, JobResultPayload, RegisterPayload, RpcLogPayload,
+        RpcPreflightPayload, RpcReadyPayload, VideoGenerationRequest, _validate_container_job,
+    )
+    from coordinator.models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
+    from coordinator.persistence import CoordinatorRepository, _container_job_dict
+    from coordinator.security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
+    from coordinator.catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS
+    from coordinator.validation import validate_contract
+    from coordinator.placement import PlacementPolicy, _physical_host
+    from coordinator.admin_api import install_admin_routes
+
 # ── config ────────────────────────────────────────────────────────────────────
+
+# The lab may customize these estimates; keep each application instance isolated.
+_RPC_MODELS = dict(_RPC_MODELS)
+_ON_DEMAND_MODELS = dict(_ON_DEMAND_MODELS)
+_RPC_DEFAULT_CONTEXT = dict(_RPC_DEFAULT_CONTEXT)
 
 ADMIN_KEY    = os.environ.get("ADMIN_KEY", "")
 AGENT_KEY    = os.environ.get("AGENT_KEY", "")
@@ -115,534 +140,30 @@ if RPC_RELAY_URL:
 
 # ── auth ──────────────────────────────────────────────────────────────────────
 
-_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+auth = ApiKeyAuth(ADMIN_KEY, AGENT_KEY, CONSUMER_KEY)
+require_agent = auth.require_agent
+require_consumer = auth.require_consumer
+require_admin = auth.require_admin
 
-def _ct_match(provided: Optional[str], *valid: str) -> bool:
-    """Constant-time check: provided matches any of the valid keys."""
-    if not provided:
-        return False
-    return any(hmac.compare_digest(provided.encode(), v.encode()) for v in valid)
-
-def _extract_key(request: Request, header_key: Optional[str]) -> Optional[str]:
-    """Accept key from X-API-Key header or Authorization: Bearer <key>."""
-    if header_key:
-        return header_key
-    auth = request.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return None
-
-def require_agent(request: Request, key: Optional[str] = Security(_header)):
-    if not _ct_match(_extract_key(request, key), AGENT_KEY, ADMIN_KEY):
-        raise HTTPException(401, "Invalid or missing API key")
-    return key
-
-def require_consumer(request: Request, key: Optional[str] = Security(_header)):
-    if not _ct_match(_extract_key(request, key), CONSUMER_KEY, ADMIN_KEY):
-        raise HTTPException(401, "Invalid or missing API key")
-    return key
-
-def require_admin(request: Request, key: Optional[str] = Security(_header)):
-    if not _ct_match(_extract_key(request, key), ADMIN_KEY):
-        raise HTTPException(401, "Invalid or missing API key")
-    return key
 
 # ── rate limiter ──────────────────────────────────────────────────────────────
 
-class _RateLimiter:
-    def __init__(self, max_calls: int, window_sec: int):
-        self.max_calls  = max_calls
-        self.window_sec = window_sec
-        self._log: dict[str, list[float]] = defaultdict(list)
-
-    def check(self, ip: str) -> None:
-        now   = time.time()
-        cutoff = now - self.window_sec
-        calls = self._log[ip]
-        while calls and calls[0] < cutoff:
-            calls.pop(0)
-        if len(calls) >= self.max_calls:
-            raise HTTPException(
-                429,
-                f"Rate limit exceeded: max {self.max_calls} requests per {self.window_sec}s",
-            )
-        calls.append(now)
 
 _consumer_rl = _RateLimiter(max_calls=60,  window_sec=60)   # 60/min per IP
 _register_rl = _RateLimiter(max_calls=30,  window_sec=300)  # 30 per 5 min per IP (supports 10+ machines behind same NAT)
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def _real_ip(request: Request) -> str:
-    """Extract the real client IP. nginx sets X-Real-IP to $remote_addr."""
-    forwarded = request.headers.get("X-Real-IP")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-# ── data models ───────────────────────────────────────────────────────────────
-
-class RegisterPayload(BaseModel):
-    port: int
-    model: str
-    agent_id: Optional[str]      = None  # stable UUID generated on agent; used as key
-    agent_pid: Optional[int] = Field(default=None, gt=0)
-    hostname: Optional[str]      = None
-    cpu_name: Optional[str]      = None
-    cpu_cores: Optional[int]     = None
-    ram_total_gb: Optional[float] = None
-    ram_free_gb: Optional[float]  = None
-    gpu_name: Optional[str]      = None
-    gpu_vram_gb: Optional[float]  = None
-    network_mbps: Optional[float] = None
-    ollama_version: Optional[str] = None
-    os_version: Optional[str]    = None
-    lan_ip: Optional[str]        = None  # agent's LAN IP for RPC peer connectivity
-    # ip is intentionally NOT accepted from payload — derived from request source
-
-class RpcLogPayload(BaseModel):
-    role: str
-    modified_at: float
-    tail: str = Field(max_length=4096)
-    process_running: bool
-
-
-class HeartbeatPayload(BaseModel):
-    port: int
-    agent_id: Optional[str] = None  # same UUID sent at registration
-    agent_pid: Optional[int] = Field(default=None, gt=0)
-    supervised: Optional[bool] = None
-    ollama_models: Optional[list[dict[str, Any]]] = Field(default=None, max_length=8)
-    rpc_log: Optional[RpcLogPayload] = None
-    agent_revision: Optional[str] = Field(default=None, max_length=64)
-    ollama_pid: Optional[int] = Field(default=None, gt=0)
-    ollama_ready: Optional[bool] = None
-    rpc_pid: Optional[int] = Field(default=None, gt=0)
-    gpu_used_mb: Optional[float] = Field(default=None, ge=0)
-    rpc_relay_external: bool = False
-    rpc_quic: bool = False
-    rpc_preflight: bool = False
-    rpc_tuning: bool = False
-    rpc_stream: bool = False
-    rpc_gpu_layers: Optional[int] = Field(default=None, ge=0, le=10000)
-    rpc_total_layers: Optional[int] = Field(default=None, ge=0, le=10000)
-    active_job_id: Optional[str] = Field(default=None, max_length=128)
-    active_claim_token: Optional[str] = Field(default=None, max_length=128)
-
-class ContainerJobCreate(BaseModel):
-    image: str
-    command: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    artifacts: list[str] = Field(default_factory=list)
-    timeout_sec: int = 3600
-    cpus: float = 1.0
-    memory_mb: int = 1024
-    network: bool = False
-    platform: Optional[str] = None
-
-class ContainerJobResult(BaseModel):
-    exit_code: int
-    elapsed_ms: float
-    stdout: str = ""
-    stderr: str = ""
-    error: Optional[str] = None
-
-def _validate_container_job(spec: ContainerJobCreate) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}", spec.image):
-        raise HTTPException(422, "image must be a Docker/OCI image reference, not a URL")
-    if not (1 <= spec.timeout_sec <= 86400):
-        raise HTTPException(422, "timeout_sec must be between 1 and 86400")
-    if not (0.1 <= spec.cpus <= 64):
-        raise HTTPException(422, "cpus must be between 0.1 and 64")
-    if not (64 <= spec.memory_mb <= 262144):
-        raise HTTPException(422, "memory_mb must be between 64 and 262144")
-    if len(spec.command) > 128 or any(len(v) > 8192 for v in spec.command):
-        raise HTTPException(422, "command is too large")
-    if len(spec.env) > 128 or any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) for k in spec.env):
-        raise HTTPException(422, "invalid environment variable name or too many variables")
-    for path in spec.artifacts:
-        if (not path or path.startswith(("/", "\\")) or ".." in path.split("/")
-                or len(path) > 512):
-            raise HTTPException(422, "artifact paths must be relative paths below /workspace")
-
-def _container_job_dict(row: sqlite3.Row, include_private: bool = False) -> dict:
-    result = {
-        "id": row["id"], "image": row["image"],
-        "command": json.loads(row["command_json"]),
-        "artifacts": json.loads(row["artifacts_json"]),
-        "timeout_sec": row["timeout_sec"], "cpus": row["cpus"],
-        "memory_mb": row["memory_mb"], "network": bool(row["network"]),
-        "platform": row["platform"], "status": row["status"],
-        "agent_id": row["agent_id"], "created_at": row["created_at"],
-        "started_at": row["started_at"], "finished_at": row["finished_at"],
-        "elapsed_ms": row["elapsed_ms"], "exit_code": row["exit_code"],
-        "stdout": row["stdout"], "stderr": row["stderr"], "error": row["error"],
-        "has_artifacts": bool(row["artifact_path"]),
-    }
-    if include_private:
-        result["env"] = json.loads(row["env_json"])
-    return result
-
-class AgentStatusPayload(BaseModel):
-    phase:    str            # CONNECTING | INSTALLING | DOWNLOADING | STARTING | REGISTERING
-    detail:   str      = ""
-    agent_id: Optional[str] = None
-    hostname: Optional[str] = None
-    model:    Optional[str] = None
-    report_id: Optional[str] = Field(default=None, max_length=128)
-    traceback: str = Field(default="", max_length=16384)
-    log_tail: str = Field(default="", max_length=16384)
-    exit_code: Optional[int] = None
-    diagnostics: dict[str, Any] = Field(default_factory=dict)
-    occurred_at: Optional[float] = None
-
-class MachineState:
-    def __init__(self, ip: str, reg: RegisterPayload):
-        self.ip             = ip
-        self.port           = reg.port
-        self.agent_id       = reg.agent_id or f"{ip}:{reg.port}"
-        self.model          = reg.model
-        self.hostname       = reg.hostname or ip
-        self.cpu_name       = reg.cpu_name or "unknown"
-        self.cpu_cores      = reg.cpu_cores
-        self.ram_total_gb   = reg.ram_total_gb
-        self.ram_free_gb    = reg.ram_free_gb
-        self.gpu_name       = reg.gpu_name
-        self.gpu_vram_gb    = reg.gpu_vram_gb
-        self.network_mbps   = reg.network_mbps
-        self.ollama_version = reg.ollama_version or "?"
-        self.os_version     = reg.os_version or "unknown"
-        self.runtime: Optional[dict] = None
-        self.phase = "RUNNING"
-        self.detail = ""
-        self.registered_at  = time.time()
-        self.last_heartbeat = time.time()
-        self.alive          = True
-        self.busy           = False
-        self.busy_job_id: Optional[str] = None
-        self.busy_claim_token: Optional[str] = None
-        self.busy_claim_attempt = 0
-        self.busy_claim_request_id: Optional[str] = None
-        self.busy_chat_model: Optional[str] = None
-        # Delayed active heartbeats must not resurrect acknowledged work.
-        # This covers recent reordering, not coordinator restart recovery.
-        self.completed_job_ids: deque[str] = deque(maxlen=64)
-        self.in_rpc        = False
-        self.rpc_cluster_id: Optional[str] = None
-        self.lan_ip: Optional[str]         = reg.lan_ip
-        self.media_phase: Optional[str] = None   # IDLE | DOWNLOADING_DEPS | RUNNING | None=unknown
-        self.media_model: Optional[str] = None
-        self.media_updated_at: Optional[float] = None
-        self.requests_ok    = 0
-        self.requests_err   = 0
-        self.response_times: deque[float] = deque(maxlen=20)
-
-    @property
-    def key(self) -> str:
-        return self.agent_id
-
-    @property
-    def base_url(self) -> str:
-        return f"http://{self.ip}:{self.port}"
-
-    @property
-    def last_seen_ago(self) -> float:
-        return time.time() - self.last_heartbeat
-
-    @property
-    def avg_response_ms(self) -> Optional[float]:
-        return statistics.mean(self.response_times) if self.response_times else None
-
-    def to_dict(self) -> dict:
-        return {
-            "key":             self.key,
-            "ip":              self.ip,
-            "port":            self.port,
-            "hostname":        self.hostname,
-            "model":           self.model,
-            "alive":           self.alive,
-            "last_seen_sec":   round(self.last_seen_ago, 1),
-            "registered_at":   datetime.fromtimestamp(self.registered_at, tz=timezone.utc).isoformat(),
-            "cpu_name":        self.cpu_name,
-            "cpu_cores":       self.cpu_cores,
-            "ram_total_gb":    self.ram_total_gb,
-            "ram_free_gb":     self.ram_free_gb,
-            "gpu_name":        self.gpu_name,
-            "gpu_vram_gb":     self.gpu_vram_gb,
-            "network_mbps":    self.network_mbps,
-            "ollama_version":  self.ollama_version,
-            "os_version":      self.os_version,
-            "runtime":         self.runtime,
-            "phase":           self.phase,
-            "detail":          self.detail,
-            "requests_ok":     self.requests_ok,
-            "requests_err":    self.requests_err,
-            "avg_response_ms": round(self.avg_response_ms, 1) if self.avg_response_ms else None,
-            "busy":            self.busy,
-            "in_rpc":          self.in_rpc,
-            "rpc_cluster_id":  self.rpc_cluster_id,
-            "lan_ip":          self.lan_ip,
-            "media_phase":     self.media_phase,
-            "media_model":     self.media_model,
-            "media_updated_sec": round(time.time() - self.media_updated_at, 0) if self.media_updated_at else None,
-        }
 
 # ── sqlite persistence ────────────────────────────────────────────────────────
 
-def _db() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    con = sqlite3.connect(DB_PATH, timeout=15)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")   # concurrent readers + writer don't block each other
-    con.execute("PRAGMA synchronous=NORMAL") # safe with WAL; faster than FULL
-    return con
-
-def _init_db() -> None:
-    with _db() as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS agent_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                report_id TEXT NOT NULL UNIQUE,
-                agent_id TEXT NOT NULL, hostname TEXT, model TEXT,
-                received_at REAL NOT NULL, payload_json TEXT NOT NULL
-            )
-        """)
-        con.execute("CREATE INDEX IF NOT EXISTS idx_agent_reports_agent ON agent_reports(agent_id, id)")
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS machines (
-                agent_id       TEXT PRIMARY KEY,
-                ip             TEXT,
-                port           INTEGER,
-                model          TEXT,
-                hostname       TEXT,
-                cpu_name       TEXT,
-                cpu_cores      INTEGER,
-                ram_total_gb   REAL,
-                ram_free_gb    REAL,
-                gpu_name       TEXT,
-                gpu_vram_gb    REAL,
-                network_mbps   REAL,
-                ollama_version TEXT,
-                os_version     TEXT,
-                registered_at  REAL,
-                last_heartbeat REAL,
-                requests_ok    INTEGER DEFAULT 0,
-                requests_err   INTEGER DEFAULT 0,
-                lan_ip         TEXT
-            )
-        """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS usage_logs (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts                REAL    NOT NULL,
-                model             TEXT    NOT NULL,
-                user_id           TEXT    NOT NULL,
-                prompt_tokens     INTEGER DEFAULT 0,
-                completion_tokens INTEGER DEFAULT 0,
-                total_tokens      INTEGER DEFAULT 0,
-                elapsed_ms        REAL,
-                success           INTEGER DEFAULT 1
-            )
-        """)
-        con.execute("CREATE INDEX IF NOT EXISTS idx_usage_ts    ON usage_logs(ts)")
-        con.execute("CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_logs(model)")
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS container_jobs (
-                id TEXT PRIMARY KEY, image TEXT NOT NULL, command_json TEXT NOT NULL,
-                env_json TEXT NOT NULL, artifacts_json TEXT NOT NULL,
-                timeout_sec INTEGER NOT NULL, cpus REAL NOT NULL, memory_mb INTEGER NOT NULL,
-                network INTEGER NOT NULL, platform TEXT, status TEXT NOT NULL,
-                agent_id TEXT, lease_until REAL, created_at REAL NOT NULL,
-                started_at REAL, finished_at REAL, elapsed_ms REAL, exit_code INTEGER,
-                stdout TEXT, stderr TEXT, error TEXT, artifact_path TEXT
-            )
-        """)
-        con.execute("CREATE INDEX IF NOT EXISTS idx_container_jobs_status ON container_jobs(status, created_at)")
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS image_jobs (
-                id          TEXT PRIMARY KEY,
-                model       TEXT,
-                prompt      TEXT,
-                status      TEXT,
-                file_paths  TEXT,
-                error       TEXT,
-                created_at  REAL,
-                elapsed_ms  REAL
-            )
-        """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS video_jobs (
-                id          TEXT PRIMARY KEY,
-                model       TEXT,
-                prompt      TEXT,
-                status      TEXT,
-                file_path   TEXT,
-                error       TEXT,
-                created_at  REAL,
-                elapsed_ms  REAL
-            )
-        """)
-        # Column migrations — silently skipped when the column already exists
-        for _col in [
-            "ALTER TABLE machines ADD COLUMN lan_ip TEXT",
-            "ALTER TABLE usage_logs ADD COLUMN finish_reason   TEXT",
-            "ALTER TABLE usage_logs ADD COLUMN hostname        TEXT",
-            "ALTER TABLE usage_logs ADD COLUMN queue_wait_ms   REAL",
-            "ALTER TABLE image_jobs ADD COLUMN negative_prompt TEXT",
-            "ALTER TABLE image_jobs ADD COLUMN n               INTEGER DEFAULT 1",
-            "ALTER TABLE image_jobs ADD COLUMN size            TEXT",
-            "ALTER TABLE image_jobs ADD COLUMN quality         TEXT",
-            "ALTER TABLE video_jobs ADD COLUMN negative_prompt TEXT",
-            "ALTER TABLE video_jobs ADD COLUMN duration        INTEGER",
-            "ALTER TABLE video_jobs ADD COLUMN width           INTEGER",
-            "ALTER TABLE video_jobs ADD COLUMN height          INTEGER",
-        ]:
-            try:
-                con.execute(_col)
-            except Exception:
-                pass
-
-def _upsert_machine(m: "MachineState") -> None:
-    with _db() as con:
-        con.execute("""
-            INSERT INTO machines (
-                agent_id, ip, port, model, hostname,
-                cpu_name, cpu_cores, ram_total_gb, ram_free_gb,
-                gpu_name, gpu_vram_gb, network_mbps, ollama_version, os_version,
-                registered_at, last_heartbeat, requests_ok, requests_err, lan_ip
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(agent_id) DO UPDATE SET
-                ip=excluded.ip, port=excluded.port, model=excluded.model,
-                hostname=excluded.hostname, cpu_name=excluded.cpu_name,
-                cpu_cores=excluded.cpu_cores, ram_total_gb=excluded.ram_total_gb,
-                ram_free_gb=excluded.ram_free_gb, gpu_name=excluded.gpu_name,
-                gpu_vram_gb=excluded.gpu_vram_gb, network_mbps=excluded.network_mbps,
-                ollama_version=excluded.ollama_version, os_version=excluded.os_version,
-                last_heartbeat=excluded.last_heartbeat,
-                requests_ok=excluded.requests_ok, requests_err=excluded.requests_err,
-                lan_ip=excluded.lan_ip
-        """, (
-            m.agent_id, m.ip, m.port, m.model, m.hostname,
-            m.cpu_name, m.cpu_cores, m.ram_total_gb, m.ram_free_gb,
-            m.gpu_name, m.gpu_vram_gb, m.network_mbps, m.ollama_version, m.os_version,
-            m.registered_at, m.last_heartbeat, m.requests_ok, m.requests_err, m.lan_ip,
-        ))
-
-def _log_usage(
-    model: str, user_id: str,
-    prompt_tokens: int, completion_tokens: int,
-    elapsed_ms: Optional[float], success: bool,
-    finish_reason:  Optional[str]   = None,
-    hostname:       Optional[str]   = None,
-    queue_wait_ms:  Optional[float] = None,
-) -> None:
-    try:
-        with _db() as con:
-            con.execute(
-                "INSERT INTO usage_logs "
-                "(ts, model, user_id, prompt_tokens, completion_tokens, total_tokens, "
-                " elapsed_ms, success, finish_reason, hostname, queue_wait_ms) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (time.time(), model, user_id, prompt_tokens, completion_tokens,
-                 prompt_tokens + completion_tokens, elapsed_ms, 1 if success else 0,
-                 finish_reason, hostname, queue_wait_ms),
-            )
-    except Exception as e:
-        print(f"[coordinator] usage log failed: {e}")
-
-
-def _save_image_job(job: "ImageJob") -> None:
-    try:
-        with _db() as con:
-            con.execute("""
-                INSERT INTO image_jobs
-                    (id, model, prompt, negative_prompt, n, size, quality,
-                     status, file_paths, error, created_at, elapsed_ms)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET
-                    status=excluded.status, file_paths=excluded.file_paths,
-                    error=excluded.error, elapsed_ms=excluded.elapsed_ms
-            """, (
-                job.id, job.model, job.prompt, job.negative_prompt, job.n,
-                job.size, job.quality,
-                job.status, json.dumps(job.file_paths), job.error,
-                job.created_at, job.elapsed_ms,
-            ))
-    except Exception as e:
-        print(f"[coordinator] save image job failed: {e}")
-
-
-def _save_video_job(job: "VideoJob") -> None:
-    try:
-        with _db() as con:
-            con.execute("""
-                INSERT INTO video_jobs
-                    (id, model, prompt, negative_prompt, duration, width, height,
-                     status, file_path, error, created_at, elapsed_ms)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET
-                    status=excluded.status, file_path=excluded.file_path,
-                    error=excluded.error, elapsed_ms=excluded.elapsed_ms
-            """, (
-                job.id, job.model, job.prompt, job.negative_prompt,
-                job.duration, job.width, job.height,
-                job.status, job.file_path, job.error,
-                job.created_at, job.elapsed_ms,
-            ))
-    except Exception as e:
-        print(f"[coordinator] save video job failed: {e}")
-
-
-def _load_media_jobs() -> "tuple[dict, dict]":
-    """Load pending image/video jobs from DB to survive coordinator restarts."""
-    imgs: dict = {}
-    vids: dict = {}
-    try:
-        with _db() as con:
-            for row in con.execute(
-                "SELECT * FROM image_jobs WHERE status IN ('queued','processing') ORDER BY created_at"
-            ):
-                job = object.__new__(ImageJob)
-                job.id              = row["id"]
-                job.model           = row["model"]
-                job.prompt          = row["prompt"] or ""
-                job.negative_prompt = row["negative_prompt"] or ""
-                job.n               = row["n"] or 1
-                job.size            = row["size"] or "1024x1024"
-                job.quality         = row["quality"] or "standard"
-                job.created_at      = row["created_at"]
-                job.status          = "queued"
-                job.dequeued_at     = None
-                job.done_event      = asyncio.Event()
-                job.file_paths      = json.loads(row["file_paths"] or "[]")
-                job.error           = None
-                job.elapsed_ms      = None
-                job.cancelled       = False
-                job.progress        = None
-                imgs[job.id]        = job
-            for row in con.execute(
-                "SELECT * FROM video_jobs WHERE status IN ('queued','processing') ORDER BY created_at"
-            ):
-                job = object.__new__(VideoJob)
-                job.id                  = row["id"]
-                job.model               = row["model"]
-                job.prompt              = row["prompt"] or ""
-                job.negative_prompt     = row["negative_prompt"] or ""
-                job.duration            = row["duration"] or 5
-                job.width               = row["width"] or 512
-                job.height              = row["height"] or 512
-                job.num_inference_steps = 0  # default — not persisted currently
-                job.created_at          = row["created_at"]
-                job.status              = "queued"
-                job.dequeued_at         = None
-                job.file_path           = None
-                job.error               = None
-                job.elapsed_ms          = None
-                job.progress            = None
-                vids[job.id]        = job
-    except Exception as e:
-        print(f"[coordinator] load media jobs failed: {e}")
-    return imgs, vids
+repository = CoordinatorRepository(lambda: DB_PATH)
+_db = repository.db
+_init_db = repository.init_db
+_upsert_machine = repository.upsert_machine
+_log_usage = repository.log_usage
+_save_image_job = repository.save_image_job
+_save_video_job = repository.save_video_job
+_load_media_jobs = repository.load_media_jobs
+_load_machines = repository.load_machines
 
 
 def _cancel_job(job_id: str, reason: str) -> None:
@@ -660,149 +181,23 @@ def _cancel_job(job_id: str, reason: str) -> None:
     print(f"[coordinator] Job {job_id[:8]} cancelled ({reason})")
 
 
-def _load_machines() -> dict[str, "MachineState"]:
-    """Load persisted machines at startup. Mark all as dead until they heartbeat."""
-    result: dict[str, MachineState] = {}
-    try:
-        with _db() as con:
-            for row in con.execute("SELECT * FROM machines"):
-                reg = RegisterPayload(
-                    agent_id       = row["agent_id"],
-                    port           = row["port"],
-                    model          = row["model"],
-                    hostname       = row["hostname"],
-                    cpu_name       = row["cpu_name"],
-                    cpu_cores      = row["cpu_cores"],
-                    ram_total_gb   = row["ram_total_gb"],
-                    ram_free_gb    = row["ram_free_gb"],
-                    gpu_name       = row["gpu_name"],
-                    gpu_vram_gb    = row["gpu_vram_gb"],
-                    network_mbps   = row["network_mbps"],
-                    ollama_version = row["ollama_version"],
-                    os_version     = row["os_version"],
-                    lan_ip         = row["lan_ip"],
-                )
-                m = MachineState(row["ip"], reg)
-                m.registered_at  = row["registered_at"]
-                m.last_heartbeat = 0  # force dead until agent heartbeats
-                m.alive          = False
-                m.requests_ok    = row["requests_ok"]
-                m.requests_err   = row["requests_err"]
-                result[m.agent_id] = m
-    except Exception as e:
-        print(f"[coordinator] DB load warning: {e}")
-    return result
-
 # ── state ─────────────────────────────────────────────────────────────────────
 
 machines: dict[str, MachineState] = {}
 
 # Agents that are still setting up (not yet registered)
-class PendingAgent:
-    def __init__(self, ip: str, hostname: Optional[str], model: Optional[str]):
-        self.ip         = ip
-        self.hostname   = hostname or ip
-        self.model      = model or "?"
-        self.phase      = "CONNECTING"
-        self.detail     = ""
-        self.updated_at = time.time()
-
-    def to_dict(self) -> dict:
-        return {
-            "key":        f"{self.ip}:?",
-            "ip":         self.ip,
-            "port":       None,
-            "hostname":   self.hostname,
-            "model":      self.model,
-            "alive":      False,
-            "pending":    True,
-            "phase":      self.phase,
-            "detail":     self.detail,
-            "updated_at": datetime.fromtimestamp(self.updated_at, tz=timezone.utc).isoformat(),
-            # nulls so the UI doesn't break on missing fields
-            "last_seen_sec": round(time.time() - self.updated_at, 1),
-            "registered_at": None,
-            "cpu_name": None, "cpu_cores": None,
-            "ram_total_gb": None, "ram_free_gb": None,
-            "gpu_name": None, "gpu_vram_gb": None, "network_mbps": None,
-            "ollama_version": None, "os_version": None,
-            "requests_ok": 0, "requests_err": 0, "avg_response_ms": None,
-        }
 
 pending: dict[str, PendingAgent] = {}
 
+placement = PlacementPolicy(machines, _RPC_MODELS, _ON_DEMAND_MODELS, lambda: _queued_chat_jobs(), DEAD_AFTER_SEC)
+_on_demand_capacity = placement.on_demand_capacity
+_worker_available = placement.worker_available
+_single_context_limit = placement.single_context_limit
+_can_serve_single = placement.can_serve_single
+_select_rpc_machines = placement.select_rpc_machines
+_automatic_pair = placement.automatic_pair
+
 # ── RPC cluster state ─────────────────────────────────────────────────────────
-# Models that need more VRAM than a single machine can provide.
-# Key = model name as users call it, value = minimum VRAM required (GB).
-_RPC_MODELS: dict[str, float] = {
-    "qwen3.6:27b":    17.0,
-    "qwen3:32b":      20.0,
-    "qwen3:30b":      19.0,
-    "qwen3:30b-a3b":  19.0,
-}
-_RPC_DEFAULT_CONTEXT = {"qwen3:30b-a3b": 32768}
-
-# Single-machine models workers may pull when the first request is queued.
-# Keep this bounded rather than accepting arbitrary registry names from consumers.
-# Values match the worker catalog's estimated model VRAM, before its 1 GB
-# operating headroom.
-_ON_DEMAND_MODELS: dict[str, float] = {
-    "qwen3:8b":              5.2,
-    "gemma4:12b":            8.0,
-    "qwen3:14b":             9.3,
-    "devstral-small-2:24b": 15.0,
-}
-
-
-def _on_demand_capacity(model: str) -> list[MachineState]:
-    required_vram = _ON_DEMAND_MODELS.get(model)
-    if required_vram is None:
-        return []
-    return [
-        machine for machine in machines.values()
-        if machine.alive
-        and not machine.in_rpc
-        and (machine.gpu_vram_gb or 0) >= required_vram + 1.0
-    ]
-
-
-def _physical_host(machine: MachineState):
-    return (machine.ip, machine.lan_ip or machine.hostname)
-
-
-def _worker_available(machine: MachineState) -> bool:
-    """One coordinator-owned workload slot, shared by chat, media and containers."""
-    return (machine.alive and not machine.busy and not machine.in_rpc
-            and time.time() - getattr(machine, "last_heartbeat", time.time()) <= DEAD_AFTER_SEC
-            and machine.media_phase not in ("RUNNING", "DOWNLOADING_DEPS")
-            and getattr(machine, "phase", "RUNNING") not in ("DOWNLOADING", "STARTING", "REGISTERING", "ERROR")
-            and not (machine.runtime or {}).get("rpc_pid")
-            and not any(other is not machine and other.alive and _physical_host(other) == _physical_host(machine)
-                        and (other.busy or other.in_rpc or (other.runtime or {}).get("rpc_pid"))
-                        for other in machines.values()))
-
-
-def _single_context_limit(machine: MachineState, model: str) -> int:
-    # Conservative scheduling policy, not the model's architectural maximum.
-    # Reserve space for KV/compute rather than sizing from weights alone.
-    policies = {
-        "qwen3:8b": ((6, 2048), (8, 8192), (12, 32768)),
-        "qwen3:14b": ((11, 4096), (12, 8192), (24, 32768)),
-        "gemma4:12b": ((9, 2048), (12, 4096), (24, 16384)),
-        "devstral-small-2:24b": ((16, 2048), (24, 16384)),
-    }
-    return max((ctx for vram, ctx in policies.get(model, ()) if (machine.gpu_vram_gb or 0) >= vram), default=4096)
-
-
-def _can_serve_single(machine: MachineState, model: str, context: Optional[int] = None) -> bool:
-    if model in _RPC_MODELS:
-        return False  # even a large GPU uses the cluster's native primary path
-    required = _ON_DEMAND_MODELS.get(model)
-    if required is not None:
-        fits = (machine.gpu_vram_gb or 0) >= required + 1.0
-    else:
-        fits = machine.model == model  # explicitly registered custom models
-    return fits and (context is None or context <= _single_context_limit(machine, model))
 
 
 def _queued_chat_jobs(model: Optional[str] = None):
@@ -969,47 +364,6 @@ def _rpc_cluster_for_machine(machine, model):
     cluster = rpc_clusters.get(machine.rpc_cluster_id)
     return cluster if cluster and cluster.model == model else None
 
-def _select_rpc_machines(required_vram: float, use_regional: bool = False, agent_ids=None):
-    idle = sorted(
-        [m for m in machines.values()
-         if _worker_available(m)
-         and (agent_ids is None or m.agent_id in agent_ids)
-         and (m.gpu_vram_gb or 0) > 0
-         and (not use_regional or (m.gpu_vram_gb or 0) >= required_vram
-              or (m.runtime or {}).get("rpc_relay_external"))],
-        key=lambda m: m.gpu_vram_gb or 0,
-        reverse=True,
-    )
-    # Reserve the smallest eligible devices for older single-machine demand,
-    # so a new RPC request cannot consume all its still-unclaimed capacity.
-    reserved = set()
-    for job in sorted(_queued_chat_jobs(), key=lambda item: item.created_at):
-        if job.model in _RPC_MODELS:
-            continue
-        candidates = [m for m in idle if m.agent_id not in reserved
-                      and _can_serve_single(m, job.model, job.body.get("options", {}).get("num_ctx"))]
-        if candidates:
-            reserved.add(min(candidates, key=lambda m: (m.gpu_vram_gb or 0, m.agent_id)).agent_id)
-    idle = [m for m in idle if m.agent_id not in reserved]
-    unique_hosts = set()
-    unique_idle = []
-    for machine in idle:
-        host = _physical_host(machine)
-        if host not in unique_hosts:
-            unique_hosts.add(host)
-            unique_idle.append(machine)
-    idle = unique_idle
-    selected: list[MachineState] = []
-    total = 0.0
-    for m in idle:
-        selected.append(m)
-        total += m.gpu_vram_gb or 0
-        if total >= required_vram:
-            break
-    if total < required_vram:
-        return None
-    return selected
-
 
 def _form_rpc_cluster(model: str, required_vram: float, ctx_size: int = 4096,
                       transport: str = "direct", regional=None, agent_ids=None, runtime=None) -> Optional[RpcCluster]:
@@ -1123,22 +477,6 @@ async def _form_managed_rpc_cluster(model, required_vram, ctx_size, request=None
         if cluster and regional:
             cluster.route_id = "managed-relay"
         return cluster, cluster is not None
-
-def _automatic_pair(required_vram, agent_ids=None):
-    eligible = [m for m in machines.values() if _worker_available(m)
-                and (m.runtime or {}).get("rpc_preflight")
-                and (agent_ids is None or m.agent_id in agent_ids)]
-    pairs = []
-    for a, b in combinations(eligible[:32], 2):
-        if _physical_host(a) == _physical_host(b):
-            continue
-        ids = [a.agent_id, b.agent_id]
-        selected = _select_rpc_machines(required_vram, agent_ids=ids)
-        if selected and len(selected) == 2:
-            # Address affinity only orders probes; it never establishes reachability.
-            affinity = bool(a.lan_ip and b.lan_ip and a.lan_ip.rsplit(".", 1)[0] == b.lan_ip.rsplit(".", 1)[0])
-            pairs.append((not affinity, -sum(m.gpu_vram_gb or 0 for m in selected), ids, selected))
-    return min(pairs, key=lambda value: value[:2])[3] if pairs else None
 
 
 async def _form_automatic_rpc_cluster(model, required_vram, ctx_size, agent_ids=None):
@@ -1358,28 +696,6 @@ CHAT_QUEUE_BYTES_PER_MODEL = 8 * 1024 * 1024
 CHAT_QUEUE_BYTES_TOTAL = 32 * 1024 * 1024
 CHAT_REQUEST_MAX_BYTES = 2 * 1024 * 1024
 
-class Job:
-    def __init__(self, body: dict, model: str):
-        self.id         = str(uuid.uuid4())
-        self.body       = body
-        self.input_bytes = _chat_payload_bytes(body)
-        self.model      = model
-        self.stream     = body.get("stream", False)
-        self.created_at = time.time()
-        self.done_event = asyncio.Event()
-        self.result:    Optional[dict] = None
-        self.error:     Optional[str]  = None
-        self.elapsed_ms: Optional[float] = None
-        self.cancelled:  bool           = False
-        self.assigned_agent_id: Optional[str] = None
-        self.claim_token: Optional[str] = None
-        self.attempts = 0
-        self.rpc_cluster_id: Optional[str] = None
-        self.rpc_recovering = False
-        self.rpc_agent_ids = None
-        self.rpc_recoveries = 0
-        self.live_stream = None
-        self.stream_started = False
 
 jobs:       dict[str, Job]            = {}
 job_queues: dict[str, asyncio.Queue]  = {}  # model → queue of Job
@@ -1394,11 +710,6 @@ def _remember_terminal_claim(job_id: str, claim_token: Optional[str]) -> None:
     terminal_chat_claims.move_to_end(key)
     while len(terminal_chat_claims) > 4096:
         terminal_chat_claims.popitem(last=False)
-
-
-def _chat_payload_bytes(body: dict) -> int:
-    # Match body_json's wire representation, including escaped Unicode.
-    return len(json.dumps(body).encode("utf-8"))
 
 
 async def _read_chat_request(request: Request) -> dict:
@@ -1452,93 +763,9 @@ async def _await_chat_completion(job: Job, request: Request, user_id: str, start
 
 # ── media (image + video) ──────────────────────────────────────────────────────
 
-IMAGE_MODELS = [
-    {
-        "id": "sdxl", "name": "Stable Diffusion XL", "vram_gb": 8,
-        "hf_repo": "stabilityai/stable-diffusion-xl-base-1.0",
-        "sizes": ["1024x1024", "1152x896", "896x1152", "1216x832", "832x1216"],
-        "note": "Native resolution is 1024×1024. Smaller sizes produce significantly lower quality.",
-    },
-]
-
-VIDEO_MODELS = [
-    {
-        "id": "ltx-video", "name": "LTX-Video", "vram_gb": 8,
-        "hf_repo": "Lightricks/LTX-Video",
-        "duration_min": 1, "duration_max": 10, "duration_default": 5,
-        "sizes": ["704x480", "768x512", "576x320", "480x704", "512x768"],
-        "supports_neg": True,
-        "fps": 8,
-        "guidance_scale": 3.5,
-        "num_inference_steps": 50,
-        "default_neg": "worst quality, inconsistent motion, blurry, jittery, distorted",
-        "note": "Use detailed, film-style prompts (describe colors, lighting, camera motion). Vague prompts produce incoherent video.",
-    },
-    {
-        "id": "cogvideox-2b", "name": "CogVideoX-2B", "vram_gb": 8,
-        "hf_repo": "THUDM/CogVideoX-2b",
-        "duration_min": 6, "duration_max": 6, "duration_default": 6,
-        "sizes": ["720x480"],
-        "supports_neg": False,
-        "fps": 8,
-        "guidance_scale": 6.0,
-        "num_inference_steps": 50,
-        "note": "Fixed 6s at 720×480; duration and resolution are not adjustable.",
-    },
-    {
-        "id": "wan-2.1-t2v-1.3b", "name": "Wan 2.1 T2V 1.3B", "vram_gb": 8,
-        "hf_repo": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "duration_min": 1, "duration_max": 10, "duration_default": 2,
-        "sizes": ["480x480", "480x832", "832x480", "512x512", "576x1024", "1024x576"],
-        "supports_neg": True,
-        "fps": 16,
-        "guidance_scale": 5.0,
-        "num_inference_steps": 20,
-        "default_neg": "worst quality, blurry, jittery, distorted, low resolution, static, no motion",
-    },
-]
 
 IMAGE_DIR = os.environ.get("IMAGE_DIR", "/data/images")
 VIDEO_DIR = os.environ.get("VIDEO_DIR", "/data/videos")
-
-
-class ImageJob:
-    def __init__(self, model: str, prompt: str, negative_prompt: str, n: int, size: str, quality: str):
-        self.id              = str(uuid.uuid4())
-        self.model           = model
-        self.prompt          = prompt
-        self.negative_prompt = negative_prompt
-        self.n               = n
-        self.size            = size
-        self.quality         = quality
-        self.created_at      = time.time()
-        self.status          = "queued"       # queued | processing | completed | failed
-        self.dequeued_at:    Optional[float] = None
-        self.done_event      = asyncio.Event()
-        self.file_paths:     list[str]       = []
-        self.error:          Optional[str]   = None
-        self.elapsed_ms:     Optional[float] = None
-        self.cancelled:      bool            = False
-        self.progress:       Optional[dict]  = None  # {"step": 5, "total": 50, "pct": 10}
-
-
-class VideoJob:
-    def __init__(self, model: str, prompt: str, negative_prompt: str, duration: int, width: int, height: int, num_inference_steps: int = 0):
-        self.id                   = str(uuid.uuid4())
-        self.model                = model
-        self.prompt               = prompt
-        self.negative_prompt      = negative_prompt
-        self.duration             = duration
-        self.width                = width
-        self.height               = height
-        self.num_inference_steps  = num_inference_steps  # 0 = use catalog default
-        self.created_at      = time.time()
-        self.status          = "queued"       # queued | processing | completed | failed
-        self.dequeued_at:    Optional[float] = None
-        self.file_path:      Optional[str]   = None
-        self.error:          Optional[str]   = None
-        self.elapsed_ms:     Optional[float] = None
-        self.progress:       Optional[dict]  = None  # {"step": 5, "total": 50, "pct": 10}
 
 
 image_jobs:       dict[str, ImageJob]      = {}
@@ -1919,14 +1146,6 @@ async def get_rpc_assignment(request: Request, _key: str = Depends(require_agent
                 if identity[:2] == (assignment["cluster_id"], agent_id) and not connection.closed.is_set()])
     return assignment
 
-class RpcReadyPayload(BaseModel):
-    agent_id:   str
-    cluster_id: str
-    role:       str   # "primary" | "worker"
-
-class RpcPreflightPayload(RpcReadyPayload):
-    stage: str
-
 
 @app.post("/agent/rpc/preflight")
 async def rpc_preflight(payload: RpcPreflightPayload, _key: str = Depends(require_agent)):
@@ -2257,13 +1476,6 @@ async def check_job_cancelled(job_id: str, _key: str = Depends(require_agent)):
     return {"cancelled": False}
 
 
-class JobResultPayload(BaseModel):
-    result:     Optional[dict]  = None
-    error:      Optional[str]   = None
-    elapsed_ms: Optional[float] = None
-    claim_token: Optional[str] = None
-
-
 install_stream_routes(app, jobs, require_agent)
 
 @app.post("/agent/jobs/{job_id}/result")
@@ -2345,191 +1557,10 @@ async def submit_job_result(
 
 # ── admin endpoints ───────────────────────────────────────────────────────────
 
-@app.get("/machines")
-async def get_machines(_key: str = Depends(require_admin)):
-    all_entries = [dict(m.to_dict(), agent_id=m.agent_id) for m in machines.values()] + \
-                  [dict(p.to_dict(), agent_id=aid) for aid, p in pending.items()]
-    with _db() as con:
-        latest = {row["agent_id"]: json.loads(row["payload_json"]) for row in con.execute(
-            "SELECT agent_id, payload_json FROM agent_reports WHERE id IN "
-            "(SELECT MAX(id) FROM agent_reports GROUP BY agent_id)")}
-    for entry in all_entries:
-        entry["last_error"] = latest.get(entry["agent_id"])
-    queued = len(_queued_chat_jobs())
-    return {
-        "total":        len(machines),
-        "alive":        sum(1 for m in machines.values() if m.alive),
-        "dead":         sum(1 for m in machines.values() if not m.alive),
-        "pending":      len(pending),
-        "queued":       queued,
-        "active_chat_streams": len(active_chat_streams),
-        "rpc_clusters": [c.to_dict() for c in rpc_clusters.values()],
-        "machines":     all_entries,
-    }
+install_admin_routes(app, require_admin=require_admin, repository=repository,
+                     machines=machines, pending=pending, rpc_clusters=rpc_clusters,
+                     active_chat_streams=active_chat_streams, queued_jobs=_queued_chat_jobs)
 
-@app.get("/stats")
-async def get_stats(_key: str = Depends(require_admin)):
-    total_ok  = sum(m.requests_ok  for m in machines.values())
-    total_err = sum(m.requests_err for m in machines.values())
-    all_times = [t for m in machines.values() for t in m.response_times]
-    return {
-        "machines_total":  len(machines),
-        "machines_alive":  sum(1 for m in machines.values() if m.alive),
-        "requests_ok":     total_ok,
-        "requests_err":    total_err,
-        "avg_response_ms": round(statistics.mean(all_times), 1) if all_times else None,
-    }
-
-
-@app.get("/stats/usage")
-async def get_usage_stats(
-    from_ts: Optional[float] = None,
-    to_ts:   Optional[float] = None,
-    bucket:  str             = "day",
-    _key: str = Depends(require_admin),
-):
-    now = time.time()
-    if from_ts is None:
-        from_ts = now - 7 * 86400
-    if to_ts is None:
-        to_ts = now
-    if bucket not in ("hour", "day", "week"):
-        bucket = "day"
-
-    if bucket == "hour":
-        fmt = "%Y-%m-%dT%H:00:00"
-    elif bucket == "week":
-        fmt = "%Y-W%W"
-    else:
-        fmt = "%Y-%m-%d"
-
-    with _db() as con:
-        series_rows = con.execute("""
-            SELECT
-                strftime(?, datetime(ts, 'unixepoch')) AS bkt,
-                SUM(prompt_tokens)                     AS prompt_tokens,
-                SUM(completion_tokens)                 AS completion_tokens,
-                SUM(total_tokens)                      AS total_tokens,
-                COUNT(*)                               AS requests,
-                SUM(CASE WHEN success=0 THEN 1 ELSE 0 END)  AS errors,
-                AVG(CASE WHEN success=1 THEN elapsed_ms END) AS avg_ms,
-                AVG(CASE WHEN queue_wait_ms IS NOT NULL THEN queue_wait_ms END) AS avg_queue_ms
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY bkt
-            ORDER BY bkt
-        """, (fmt, from_ts, to_ts)).fetchall()
-
-        model_rows = con.execute("""
-            SELECT
-                model,
-                SUM(prompt_tokens)     AS prompt_tokens,
-                SUM(completion_tokens) AS completion_tokens,
-                SUM(total_tokens)      AS total_tokens,
-                COUNT(*)               AS requests,
-                SUM(CASE WHEN success=0 THEN 1 ELSE 0 END)  AS errors,
-                AVG(CASE WHEN success=1 THEN elapsed_ms END) AS avg_ms,
-                AVG(CASE WHEN queue_wait_ms IS NOT NULL THEN queue_wait_ms END) AS avg_queue_ms
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY model
-            ORDER BY requests DESC
-        """, (from_ts, to_ts)).fetchall()
-
-        user_rows = con.execute("""
-            SELECT
-                user_id,
-                SUM(total_tokens) AS total_tokens,
-                COUNT(*)          AS requests
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY user_id
-            ORDER BY requests DESC
-            LIMIT 20
-        """, (from_ts, to_ts)).fetchall()
-
-        hour_rows = con.execute("""
-            SELECT
-                CAST(strftime('%H', datetime(ts, 'unixepoch')) AS INTEGER) AS hour,
-                COUNT(*)                                                    AS requests,
-                AVG(CASE WHEN success=1 THEN elapsed_ms END)               AS avg_ms
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY hour
-            ORDER BY hour
-        """, (from_ts, to_ts)).fetchall()
-
-        reason_rows = con.execute("""
-            SELECT
-                COALESCE(finish_reason, 'unknown') AS reason,
-                COUNT(*) AS count
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY reason
-            ORDER BY count DESC
-        """, (from_ts, to_ts)).fetchall()
-
-        host_rows = con.execute("""
-            SELECT
-                COALESCE(hostname, 'unknown') AS hostname,
-                COUNT(*)                      AS requests,
-                SUM(total_tokens)             AS total_tokens,
-                AVG(CASE WHEN success=1 THEN elapsed_ms END)               AS avg_ms,
-                AVG(CASE WHEN queue_wait_ms IS NOT NULL THEN queue_wait_ms END) AS avg_queue_ms
-            FROM usage_logs
-            WHERE ts >= ? AND ts <= ?
-            GROUP BY hostname
-            ORDER BY requests DESC
-        """, (from_ts, to_ts)).fetchall()
-
-    # Fill in all 24 hours even if no data (makes heatmap uniform)
-    hour_map = {r["hour"]: r for r in hour_rows}
-    by_hour = [{
-        "hour":     h,
-        "label":    f"{h:02d}:00",
-        "requests": (hour_map[h]["requests"] if h in hour_map else 0),
-        "avg_ms":   (round(hour_map[h]["avg_ms"], 1) if h in hour_map and hour_map[h]["avg_ms"] else None),
-    } for h in range(24)]
-
-    return {
-        "from_ts":          from_ts,
-        "to_ts":            to_ts,
-        "bucket":           bucket,
-        "series": [{
-            "bucket":             r["bkt"],
-            "prompt_tokens":      r["prompt_tokens"]     or 0,
-            "completion_tokens":  r["completion_tokens"] or 0,
-            "total_tokens":       r["total_tokens"]      or 0,
-            "requests":           r["requests"]          or 0,
-            "errors":             r["errors"]            or 0,
-            "avg_ms":             round(r["avg_ms"], 1)       if r["avg_ms"]       else None,
-            "avg_queue_ms":       round(r["avg_queue_ms"], 1) if r["avg_queue_ms"] else None,
-        } for r in series_rows],
-        "by_model": [{
-            "model":              r["model"],
-            "prompt_tokens":      r["prompt_tokens"]     or 0,
-            "completion_tokens":  r["completion_tokens"] or 0,
-            "total_tokens":       r["total_tokens"]      or 0,
-            "requests":           r["requests"]          or 0,
-            "errors":             r["errors"]            or 0,
-            "avg_ms":             round(r["avg_ms"], 1)       if r["avg_ms"]       else None,
-            "avg_queue_ms":       round(r["avg_queue_ms"], 1) if r["avg_queue_ms"] else None,
-        } for r in model_rows],
-        "by_user": [{
-            "user_id":      r["user_id"],
-            "total_tokens": r["total_tokens"] or 0,
-            "requests":     r["requests"]     or 0,
-        } for r in user_rows],
-        "by_hour":          by_hour,
-        "by_finish_reason": [{"reason": r["reason"], "count": r["count"]} for r in reason_rows],
-        "by_hostname": [{
-            "hostname":     r["hostname"],
-            "requests":     r["requests"]     or 0,
-            "total_tokens": r["total_tokens"] or 0,
-            "avg_ms":       round(r["avg_ms"], 1)       if r["avg_ms"]       else None,
-            "avg_queue_ms": round(r["avg_queue_ms"], 1) if r["avg_queue_ms"] else None,
-        } for r in host_rows],
-    }
 
 # ── consumer endpoints ────────────────────────────────────────────────────────
 
@@ -2710,10 +1741,10 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
         if selected_ids is not None:
             if not _ct_match(_extract_key(request, _key), ADMIN_KEY):
                 raise HTTPException(403, "Explicit trial membership requires the admin key")
-            if (body.get("rpc_transport") not in ("quic", "auto") or not isinstance(selected_ids, list)
-                    or len(selected_ids) != 2 or any(not isinstance(aid, str) or not 1 <= len(aid) <= 128 for aid in selected_ids)
-                    or len(set(selected_ids)) != 2):
-                raise HTTPException(422, "rpc_agent_ids requires two distinct IDs and rpc_transport quic or auto")
+            try:
+                validate_contract("trial-membership", body)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
         cluster = _find_rpc_cluster_for_model(requested_model, agent_ids=selected_ids)
         if cluster and runtime_override is not None and cluster.runtime_profile != runtime_override:
             raise HTTPException(409, "Existing cluster has different runtime settings; stop it when idle first")
@@ -2729,8 +1760,6 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
             raise HTTPException(503, "Relay is nearing its runtime limit; retry after cluster teardown",
                                 headers={"Retry-After": "30"})
         options = body.setdefault("options", {})
-        if not isinstance(options, dict):
-            raise HTTPException(422, "RPC options must be an object")
         ctx_size = options.get("num_ctx", cluster.ctx_size if cluster else _RPC_DEFAULT_CONTEXT.get(requested_model, 4096))
         if type(ctx_size) is not int or not 512 <= ctx_size <= 32768:
             raise HTTPException(422, "RPC num_ctx must be an integer between 512 and 32768")
@@ -2976,16 +2005,6 @@ async def list_image_models(_key: str = Depends(require_consumer)):
     return {"object": "list", "data": IMAGE_MODELS}
 
 
-class ImageGenerationRequest(BaseModel):
-    model:           str = "flux-schnell"
-    prompt:          str
-    negative_prompt: str = ""
-    n:               int = 1
-    size:            str = "1024x1024"
-    quality:         str = "standard"
-    response_format: str = "url"
-
-
 @app.post("/v1/images/generations")
 async def generate_image(request: Request, payload: ImageGenerationRequest, _key: str = Depends(require_consumer)):
     _consumer_rl.check(_real_ip(request))
@@ -3067,16 +2086,6 @@ async def serve_image_file(filename: str, _key: str = Depends(require_consumer))
 @app.get("/v1/videos/models")
 async def list_video_models(_key: str = Depends(require_consumer)):
     return {"object": "list", "data": VIDEO_MODELS}
-
-
-class VideoGenerationRequest(BaseModel):
-    model:                str = "ltx-video"
-    prompt:               str
-    negative_prompt:      str = ""
-    duration:             int = 5
-    width:                int = 512
-    height:               int = 512
-    num_inference_steps:  int = 0   # 0 = use catalog default
 
 
 _VIDEO_CAPS = {m["id"]: m for m in VIDEO_MODELS}

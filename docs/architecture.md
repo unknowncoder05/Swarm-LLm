@@ -38,6 +38,12 @@ and Terraform operation.
 | Component | Responsibility |
 | --- | --- |
 | `coordinator/coordinator.py` | Authenticated API, worker inventory, physical-host reservations, replica scheduling, claim/result fencing and orchestration |
+| `coordinator/api_models.py`, `models.py` | Typed HTTP payloads and machine/job entities without scheduler globals |
+| `coordinator/security.py` | Three-role API-key authentication, client identity and request rate limits |
+| `coordinator/persistence.py` | SQLite migrations, inventory/media recovery, usage recording and aggregation |
+| `coordinator/catalog.py`, `placement.py` | Model estimates, context policy, physical-host eligibility and fair GPU selection |
+| `coordinator/admin_api.py` | Inventory and usage endpoints wired to explicit repository and runtime dependencies |
+| `coordinator/validation.py`, `schemas/` | Cached Draft 2020-12 JSON Schema validation for untyped client/agent inputs |
 | `coordinator/chat_admission.py` | Request validation and normalization without network I/O |
 | `coordinator/relay_policy.py` | Candidate coverage, network affinity and failed-route cooldowns |
 | `coordinator/quic_control.py` | Immutable peer endpoint exchange and cluster-scoped QUIC trust material |
@@ -55,9 +61,11 @@ and Terraform operation.
 | `ui/src/chat-request.ts` | Cancellable, bounded waiting for explicitly rejected GPU capacity; no automatic replay of accepted inference |
 | `scripts/setup-opencode.py`, `gen_opencode_config.py`, `run-opencode.py` | Live model discovery, client configuration and private credential loading |
 
-These extractions give transport, validation and configuration code explicit
-boundaries. Scheduling and durable job execution have not been rewritten into
-independent services; the API process still owns their in-memory state.
+These modules keep transport, validation, persistence and placement policy behind
+explicit boundaries. The API process owns scheduling state and reservations;
+module extraction does not change queue durability or create additional services.
+See [coordinator modules and schema contracts](coordinator-modules.md) for the
+dependency rules and validation workflow.
 
 ## Scheduling and resource ownership
 
