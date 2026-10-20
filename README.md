@@ -200,6 +200,7 @@ journals remain outside Git.
 
 Start with [architecture](docs/architecture.md),
 [coordinator modules](docs/coordinator-modules.md),
+[Qwen3.8-27B setup](docs/qwen38.md),
 [distributed inference](docs/distributed-inference.md),
 [routing](docs/relay-routing.md) or [dashboard behavior](docs/controller-dashboard.md).
 The [AWS lab](infra/rpc-lab/README.md) and [optional relay](infra/relay/README.md)

@@ -8,7 +8,7 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-MODELS = ("qwen3:30b-a3b", "qwen3:14b", "qwen3:8b", "devstral-small-2:24b", "devstral:24b",
+MODELS = ("qwen3.8:27b-q4_K_M", "qwen3:30b-a3b", "qwen3:14b", "qwen3:8b", "devstral-small-2:24b", "devstral:24b",
           "ministral-3:8b", "qwen2.5-coder:0.5b", "qwen2.5-coder:1.5b", "qwen2.5-coder:3b",
           "qwen2.5-coder:7b", "qwen2.5-coder:14b", "deepseek-r1:14b")
 DEFAULT_BASE_URL = "http://127.0.0.1:8081/swarm/api/v1"
@@ -120,7 +120,8 @@ def build_config(model, base_url=BASE_URL_ENV, context=32768, advertised=None):
     # These bounded profiles match Swarm's conservative minimum context policies.
     profiles = {"qwen3:8b": 2048, "qwen3:14b": 4096, "gemma4:12b": 2048,
                 "devstral-small-2:24b": 2048, "qwen3.6:27b": 4096,
-                "qwen3:30b": 4096, "qwen3:32b": 4096, "qwen3:30b-a3b": context}
+                "qwen3:30b": 4096, "qwen3:32b": 4096, "qwen3:30b-a3b": context,
+                "qwen3.8:27b-q4_K_M": 32768}
     for name, window in profiles.items():
         if name not in models:
             continue
@@ -130,6 +131,8 @@ def build_config(model, base_url=BASE_URL_ENV, context=32768, advertised=None):
             profile.update(reasoning=True, interleaved={"field": "reasoning_content"})
         if name == "qwen3:30b-a3b":
             profile["options"] = {"options": {"num_ctx": context}}
+        if name == "qwen3.8:27b-q4_K_M":
+            profile["options"] = {"options": {"num_ctx": window}}
     config = {"$schema": "https://opencode.ai/config.json", "model": "swarm-llm/" + model,
         "small_model": "swarm-llm/" + model,
         "provider": {"swarm-llm": {"npm": "@ai-sdk/openai-compatible", "name": "Swarm LLM",

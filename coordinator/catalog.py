@@ -1,13 +1,20 @@
 """Bounded model catalogs and conservative admission estimates in GiB."""
 
 _RPC_MODELS: dict[str, float] = {
+    "qwen3.8:27b-q4_K_M": 19.0,
     "qwen3.6:27b": 17.0,
     "qwen3:32b": 20.0,
     "qwen3:30b": 19.0,
     "qwen3:30b-a3b": 19.0,
 }
 
-_RPC_DEFAULT_CONTEXT = {"qwen3:30b-a3b": 32768}
+_RPC_DEFAULT_CONTEXT = {"qwen3:30b-a3b": 32768, "qwen3.8:27b-q4_K_M": 32768}
+
+# Resolve the upstream model ID to an explicit artifact supported by our runtime.
+MODEL_ALIASES = {
+    "Qwen/Qwen3.8-27B": "qwen3.8:27b-q4_K_M",
+    "qwen3.8:27b": "qwen3.8:27b-q4_K_M",
+}
 
 _ON_DEMAND_MODELS: dict[str, float] = {
     "qwen3:8b": 5.2,

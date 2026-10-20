@@ -520,6 +520,7 @@ function renderContent(content: string, isUser: boolean) {
 interface ModelOption { id: string; desc: string; vram: string; }
 
 const MODEL_CATALOG: ModelOption[] = [
+  { id: "qwen3.8:27b-q4_K_M",   desc: "Qwen3.8 dense 27B — Q4_K_M distributed inference", vram: "17 GB" },
   { id: "devstral-small-2:24b", desc: "Mistral's purpose-built agentic coding model",    vram: "15 GB"  },
   { id: "qwen3.6:27b",          desc: "Top-tier coding & reasoning — Qwen 2026",         vram: "17 GB"  },
   { id: "qwen3:30b-a3b",        desc: "MoE architecture — 30B params, 3B active",        vram: "17 GB"  },

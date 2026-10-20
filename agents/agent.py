@@ -408,6 +408,7 @@ def get_system_info(hw):
 # model catalog / VRAM helpers
 # ---------------------------------------------------------------------------
 _MODEL_VRAM = {
+    "qwen3.8:27b-q4_K_M":  17.0,
     "qwen2.5-coder:1.5b":   1.2,
     "devstral-small-2:24b": 15.0,
     "qwen3.6:27b":          17.0,
@@ -424,6 +425,7 @@ _MODEL_CATALOG = [
     {"id": "qwen3:14b",            "vram": 9.3 },
     {"id": "devstral-small-2:24b", "vram": 15.0},
     {"id": "qwen3.6:27b",          "vram": 17.0},
+    {"id": "qwen3.8:27b-q4_K_M",  "vram": 17.0},
     {"id": "qwen3:30b-a3b",        "vram": 17.0},
 ]
 
@@ -440,14 +442,14 @@ def recommended_model_index(vram_gb):
     # includes its native context/compute overhead as well as the model weights.
     candidates = [(item["vram"], index) for index, item in enumerate(_MODEL_CATALOG)
                   if (19.0 if item["id"] == "qwen3:30b-a3b" else
-                      19.0 if item["id"] == "qwen3.6:27b" else item["vram"] + 1.0) <= vram_gb]
+                      19.0 if item["id"] in ("qwen3.6:27b", "qwen3.8:27b-q4_K_M") else item["vram"] + 1.0) <= vram_gb]
     return max(candidates)[1] if candidates else 0
 
 def ollama_parallel(vram_gb, model):
     if vram_gb <= 0:
         return 1
     model_v = {
-        "devstral-small-2:24b": 15, "qwen3.6:27b": 17, "qwen3:14b": 9,
+        "devstral-small-2:24b": 15, "qwen3.6:27b": 17, "qwen3.8:27b-q4_K_M": 17, "qwen3:14b": 9,
         "gemma4:12b": 8, "qwen3:8b": 5,
     }.get(model, int(vram_gb * 0.65))
     free = vram_gb - model_v - 2
@@ -1343,9 +1345,12 @@ def rpc_infer(job_body, llama_port, emit=None):
         "messages": messages,
         "stream":   emit is not None,
     }
-    # Qwen's Thinking-2507 recommendations; preserve explicit caller overrides.
+    # Model-author defaults; preserve explicit caller overrides.
     defaults = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0} if job_body.get("model") == "qwen3:30b-a3b" else {}
-    for name in ("temperature", "top_p", "top_k", "min_p"):
+    if job_body.get("model") == "qwen3.8:27b-q4_K_M":
+        defaults = {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0,
+                    "presence_penalty": 0.0, "repeat_penalty": 1.0}
+    for name in ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "repeat_penalty"):
         value = opts.get(name, defaults.get(name))
         if value is not None:
             openai_body[name] = value

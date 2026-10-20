@@ -84,6 +84,7 @@ These are configured admission estimates, not guaranteed footprints:
 | Identifier | Combined reported VRAM required |
 | --- | ---: |
 | `qwen3.6:27b` | 17 GB |
+| `qwen3.8:27b-q4_K_M` | 19 GB |
 | `qwen3:32b` | 20 GB |
 | `qwen3:30b` | 19 GB |
 | `qwen3:30b-a3b` | 19 GB |

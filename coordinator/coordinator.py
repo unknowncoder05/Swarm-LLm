@@ -73,7 +73,7 @@ try:
     from models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
     from persistence import CoordinatorRepository, _container_job_dict
     from security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
-    from catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS
+    from catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES
     from validation import validate_contract
     from placement import PlacementPolicy, _physical_host
     from admin_api import install_admin_routes
@@ -86,7 +86,7 @@ except ModuleNotFoundError:
     from coordinator.models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
     from coordinator.persistence import CoordinatorRepository, _container_job_dict
     from coordinator.security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
-    from coordinator.catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS
+    from coordinator.catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES
     from coordinator.validation import validate_contract
     from coordinator.placement import PlacementPolicy, _physical_host
     from coordinator.admin_api import install_admin_routes
@@ -1718,7 +1718,7 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
     user_id = request.headers.get("X-User-ID") or _ip
 
     body = await _read_chat_request(request)
-    requested_model = body["model"]
+    requested_model = MODEL_ALIASES.get(body["model"], body["model"])
     runtime_override = body.pop("rpc_runtime", None)
     if runtime_override is not None:
         if not _ct_match(_extract_key(request, _key), ADMIN_KEY):
@@ -1886,7 +1886,7 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
     # leaving ~17K tokens for the KV cache total. Thinking tokens consume most of
     # that window before the real answer begins, causing truncation. Since we strip
     # <think> blocks from the response anyway, the tokens are wasted.
-    if "qwen3" in requested_model and "think" not in body.get("options", {}):
+    if not _rpc_vram_needed and "qwen3" in requested_model and "think" not in body.get("options", {}):
         body.setdefault("options", {})["think"] = False
 
     # Build a clean Ollama-native /api/chat body, dropping all OpenAI-only fields
