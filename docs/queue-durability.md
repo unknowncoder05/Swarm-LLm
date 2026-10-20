@@ -47,7 +47,7 @@ polling with `basic.get` needs its own outstanding-work bound.
 Preserve model/context eligibility and a single physical GPU lease across chat,
 RPC, media, and container work. A dispatch lane must reserve a host before it
 hands work to that host. Prefetch is an intake control, not the GPU lock. Keep
-AMQP internal to the coordinator network; campus agents retain their existing
+AMQP internal to the coordinator network; worker network agents retain their existing
 outbound HTTPS connection and need no administrator access or broker credentials.
 
 Notifications should contain job IDs and scheduling metadata, not model weights

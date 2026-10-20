@@ -1,174 +1,206 @@
 # Swarm LLM
 
-Dashboard: https://sandbox.yerson.co/swarm/
+Run language models across your own GPU machines, with one API and a dashboard
+for model placement, worker health and inference requests.
 
-See the [architecture and component guide](docs/architecture.md) for scheduling,
-inference transports, streaming, persistence, deployment and repository ownership.
+Swarm supports both **independent workers** for more simultaneous requests and
+**distributed inference** for models too large for one GPU. A Python coordinator
+owns scheduling; agents execute Ollama or llama.cpp on the worker machines.
+OpenCode and other OpenAI-compatible clients use the same endpoint.
 
-The [controller status guide](docs/controller-dashboard.md) explains loaded
-models, distributed replicas, download progress and GPU memory reporting.
-The Chat tab [waits for distributed agents after restarts](docs/ui-startup-wait.md)
-and continues through model setup without resubmitting accepted inference.
+## How it works
 
-Cloud relay use is currently disabled and its resources are removed. See
-[relay routing and recovery](docs/relay-routing.md) for connectivity checks before
-model startup, network-specific relay candidates, bounded failover and re-enabling.
+```mermaid
+flowchart LR
+    Client[OpenCode or API client] <-->|HTTPS · chat, models, SSE| Gateway[Nginx gateway]
+    Gateway <--> Coordinator[FastAPI coordinator]
+    Coordinator <--> Scheduler[Bounded queues and GPU reservations]
+    Coordinator <--> Store[(SQLite · inventory, usage, reports)]
+    subgraph PC1[PC 1 · primary]
+        Primary[Python agent + llama-server] --> GPU1[Local GPU · model layers]
+    end
+    subgraph PC2[PC 2 · worker]
+        Worker[Python agent + RPC server] --> GPU2[Remote GPU · model layers]
+    end
+    Primary -->|Outbound HTTPS · claims, deltas, results| Coordinator
+    Worker -->|Outbound HTTPS · assignments, health| Coordinator
+    Primary <-->|Encrypted LAN QUIC · native RPC| Worker
+```
 
-The gateway binds to `127.0.0.1:8081`. The coordinator (`8080`) and UI
-(`8082`) are only exposed inside Docker. Host ports 8000 and 3000 remain
-available for the other application.
+Agents initiate control connections, so the coordinator does not need to connect
+inbound to each PC. When direct peer UDP works, reliable QUIC carries native RPC
+between the GPUs without a separate relay or Windows administrator access.
+Outbound HTTPS relays and private TCP are also supported. Connectivity is checked
+before native model startup. The coordinator schedules work; it never executes
+model layers.
 
-Start or rebuild the full stack with `make rebuild-all`; inspect it with
-`make status` and `make health`. Containers restart automatically unless stopped.
-Existing API keys remain in `.env`; use the admin key to sign into the dashboard.
+## Multi-PC model allocation
 
-Public endpoints:
+For example, a 30B model can span two 12 GB GPUs. Exact fit depends on the model's
+quantization, context, KV cache and available memory; adding reported VRAM is an
+admission estimate, not a fit guarantee.
 
-- Agent coordinator: `https://sandbox.yerson.co/swarm/api`
-- OpenAI-compatible API: `https://sandbox.yerson.co/swarm/api/v1`
-- Health: `https://sandbox.yerson.co/swarm/api/healthz`
+```mermaid
+flowchart TD
+    Request[Request a distributed model] --> Ready{Matching ready replica?}
+    Ready -->|Yes| Reuse[Queue on the least-loaded ready replica]
+    Ready -->|No| Capacity{Enough eligible idle GPU capacity?}
+    Capacity -->|No| Wait[Dashboard waits for capacity · cancellable]
+    Wait --> Capacity
+    Capacity -->|Yes| Reserve[Reserve distinct physical PCs and verify route]
+    Reserve --> Pair[One native model split across the selected GPUs]
+    subgraph Replica[Example · one 30B replica]
+        Pair --> Primary[PC 1 · 12 GB GPU · primary layers]
+        Pair --> Worker[PC 2 · 12 GB GPU · worker layers]
+        Primary <-->|Native RPC over QUIC| Worker
+    end
+    Replica --> Serve[One generation slot for this replica]
+    NewPC[Another PC joins] --> Pool[Additional eligible capacity]
+    Pool --> Independent[Independent single-PC model]
+    Pool --> Another[Explicitly form another replica on another GPU pair]
+```
 
-## OpenCode
+A third PC does not hot-join a running model or replace its members. It can serve
+independent work; another GPU pair can serve a separate replica of the same model.
+Ordinary requests prefer a ready replica with less pending work. Each physical
+host has one workload reservation shared by chat, distributed inference, media
+and container jobs, preventing those workloads from independently claiming it.
 
-Configure and launch the distributed model:
+More GPUs help models fit and can increase throughput. They do not necessarily
+make an individual reply faster: layer splitting adds synchronization and network
+traffic. See [performance controls](docs/performance.md) for repeatable comparisons.
+
+## Features
+
+- OpenAI-compatible model discovery and chat, including streamed reasoning, text
+  and tool-call deltas from capable distributed agents.
+- On-demand model download and loading, context admission, bounded queues and
+  cancellation with claim fencing.
+- Verified route selection: direct LAN QUIC, configured relays and coordinator
+  relay fallback, with bounded recovery after teardown.
+- Dashboard views for actual loaded models, replica state, download progress,
+  GPU-memory allocation and retained failures.
+- Per-user Windows configuration, watchdog supervision and idle self-updates.
+- OpenCode setup with live model discovery and optional title-only routing to a
+  spare worker, plus isolated read/edit/test checks.
+- Optional Docker batch and media workers, and disposable Terraform GPU/relay labs.
+
+## Run the coordinator
+
+Requirements: Docker with Compose and Python 3 for the setup/client helpers.
+GPU agents need compatible installed drivers; the direct QUIC path requires
+Python 3.11 or newer on the agents.
 
 ```sh
-python3 scripts/setup-opencode.py
+make init       # Creates private .env with fresh keys; preserves an existing file
+make up
+```
+
+Open **http://127.0.0.1:8081/swarm/** and sign in with the admin key from `.env`.
+Use `make status` and `make health` to inspect the stack. The coordinator and UI
+ports remain inside Docker; the gateway binds to loopback.
+
+To connect other PCs, provide an HTTPS deployment URL reachable from them.
+[The nginx example](nginx/swarm.conf.example) forwards `/swarm/` to the gateway.
+The UI derives its join commands and API banner from the current browser origin.
+Keep deployment-specific URLs and credentials in ignored `.env`/`.env.opencode`
+files; optional private gateway routes belong in ignored `nginx/local.d/`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/swarm/` | Dashboard |
+| `/swarm/api` | Agent control API |
+| `/swarm/api/v1/models` | Current model catalog |
+| `/swarm/api/v1/chat/completions` | OpenAI-compatible chat |
+| `/swarm/api/healthz` | Health check |
+
+## Connect GPU agents
+
+Use the dashboard's platform-specific join command, or download the supplied
+Python agent from your deployment:
+
+```sh
+export SWARM_URL=https://swarm.example.com/swarm
+export SWARM_AGENT_KEY=your-agent-key
+curl -fsSL "$SWARM_URL/agent/agent.py" -o agent.py
+python3 agent.py --coordinator "$SWARM_URL/api" --api-key "$SWARM_AGENT_KEY"
+```
+
+On Windows, use the PowerShell/CMD command shown in the dashboard. The agent
+prepares its per-user runtime and reports progress. A distributed request forms
+its native cluster when enough eligible GPUs are available. The dashboard can
+[wait through reconnection and setup](docs/ui-startup-wait.md); a cold download
+or model load can take several minutes.
+
+The reviewed sources are included in [`agents/`](agents/README.md). No personal
+repository or external agent checkout is required to serve them.
+
+## Use OpenCode
+
+```sh
+python3 scripts/setup-opencode.py --install --base-url https://swarm.example.com/swarm/api/v1
 python3 scripts/run-opencode.py
 ```
 
-If OpenCode is missing, add `--install` to setup to install it locally using npm,
-without administrator access. On Windows use `py -3` instead of `python3`.
-Setup accepts your Swarm URL and consumer key, shows the live model choices,
-and preserves other providers and settings. In OpenCode use `/models`, select a
-Swarm model, and send a prompt; Swarm downloads/starts it on demand.
-Use `python3 scripts/setup-opencode.py --list-models` to inspect the current
-catalog without starting inference. See [client setup](docs/opencode-setup.md)
-for refreshing the picker, switching models, and cold-start behavior.
-The launcher loads the credential privately from the environment, `.env.opencode`,
-or `.env`. The generated
-30B profile requests a 32K context for coding tools and keeps reasoning enabled.
-Use `python3 scripts/opencode-smoke.py` for an isolated read/edit/test trial.
-Updated distributed agents support incremental responses; see
-[30B latency tuning and streaming](docs/performance.md) for the
-controlled cache/batch benchmark and `scripts/rpc-stream-smoke.py`.
+Replace the example URL with your deployment and enter its consumer key when
+prompted. Use `py -3` on Windows. Setup installs the pinned CLI locally, discovers
+available models and preserves other providers. The checked-in profile references
+environment variables; deployment URL and prompted key are saved privately.
 
-For machine joins, model placement, workload contention, and recovery behavior,
-see [scheduling and resource ownership](docs/architecture.md#scheduling-and-resource-ownership)
-and [agent failure reporting](docs/agent-failure-reports.md).
-The [on-demand relay](docs/relay-provisioning.md) supports coordinator-triggered
-Terraform provisioning, bounded instance profiles, lease renewal, and idle cleanup.
-The [queue durability design](docs/queue-durability.md) evaluates RabbitMQ and
-the state/lease changes needed before adopting it.
+Choose a Swarm model with `/models`, then send a request. Model downloads and
+startup happen on demand. [The client guide](docs/opencode-setup.md) covers
+refreshing the catalog, switching models, context and optional title routing.
 
-Dated trial results and work journals are retained locally in ignored `.journal/`.
-The tracked guides describe supported behavior, configuration and verification.
-
-## Distributed models and AWS trial
-
-The Python agents can combine GPUs on multiple machines through llama.cpp RPC.
-The coordinator forms a cluster when a client requests a model in its RPC
-catalog. The primary connects directly to the workers over a private network and
-pulls a missing GGUF into its Ollama cache automatically.
-
-When peer UDP works, [direct LAN QUIC](docs/direct-quic-inference.md) carries
-reliable, encrypted RPC between two Python agents without administrator access
-or an external relay. Automatic routing tries it first and verifies connectivity
-before model startup; see [routing and recovery](docs/relay-routing.md).
-Request `"rpc_transport": "quic"` to require that transport explicitly.
-Independent GPU pairs can serve the same model through separate replicas;
-[the architecture guide](docs/architecture.md) covers admission, routing and
-preservation of idle native clusters during coordinator deployment.
-
-For machines without a working direct LAN path, set `"rpc_transport": "relay"` on the
-first chat request. Both Python agents connect outward over HTTPS through the
-existing coordinator, with native RPC listeners on localhost. This needs no
-Windows administrator privileges but adds transfer time and network latency.
-Run `python3 scripts/rpc-trial.py --transport relay` for a two-machine GPU trial.
-For nearby forwarding using the existing GPUs, the [relay module](infra/relay/README.md)
-creates one small CPU instance in the default VPC with Terraform and a bounded
-trial lifetime.
-
-See [distributed inference](docs/distributed-inference.md) for the architecture,
-requirements, and known limitations. A self-contained, disposable AWS experiment
-with two small real GPUs (or a larger Spot profile) is in [infra/rpc-lab](infra/rpc-lab/README.md). Terraform
-owns its cloud resources; the trial runner destroys them after the experiment.
-
-## Windows LLM agent
-
-Run the downloaded `agent.py` normally. On its first successful configuration it
-stores the coordinator, credential, selected model, and Ollama port under the
-current user's `%LOCALAPPDATA%\\CodeSwarm\\SwarmLLM` directory. It then installs
-and starts a hidden watchdog through the current user's Startup folder. Future
-logins, coordinator outages, crashes, and self-updates are handled automatically;
-no administrator permission or manual Docker/Ollama context selection is needed.
-The dashboard's explicit coordinator/key command also starts the watchdog
-immediately. Use `--foreground` only when you want to keep the agent attached
-to the terminal for troubleshooting.
-
-Running `agent.py` again without arguments reuses the saved context and repairs
-the watchdog. Runtime output is kept in
-`%LOCALAPPDATA%\\CodeSwarm\\SwarmLLM\\agent.log` instead of opening a terminal.
-The stable agent ID is kept with this context, with migration from the older
-TEMP file. Newly started Ollama servers listen on localhost; an adopted existing
-server keeps its existing listener configuration.
-
-Startup and runtime failures are reported automatically. Expand **Last failure**
-on a machine in the dashboard to see the traceback, Ollama output, exit code,
-and disk-space details. Reports survive retries and coordinator restarts; an
-admin can also query `GET /swarm/api/agent-reports?hostname=MACHINE_NAME` with
-the admin key. See [agent failure reports](docs/agent-failure-reports.md).
-
-Check installation health, update consistency, API permissions, and inference:
+## Verification
 
 ```sh
-python3 scripts/agent-health.py --hosts A506-209-12 A506-209-13 --smoke
+uv run --python 3.12 --with-requirements coordinator/requirements.txt \
+  --with requests --with httpx --with aioquic==1.7.0 \
+  python -m unittest discover -s tests -p 'test_*.py'
+npm ci --prefix ui
+npm test --prefix ui
+npm run build --prefix ui
+python3 scripts/rpc-stream-smoke.py
+python3 scripts/opencode-smoke.py
 ```
 
-The check waits for current supervised agents, observes which agents claim the
-short inference jobs, verifies at least 80% GPU placement according to Ollama's
-loaded-model telemetry, and saves private evidence under `.rpc-trial/`. Omit
-`--smoke` for health and permission checks without model execution.
+The Python suite exercises scheduling, claims, queue limits, teardown, transport
+faults and streaming. UI tests cover machine/replica presentation and startup
+waiting. The final two commands use actual available agents; the OpenCode check
+reads, edits and tests a disposable coding fixture. Private results and work
+journals remain outside Git.
 
-## Container jobs
+## Boundaries and tradeoffs
 
-The optional container worker turns registered machines with Docker into a small,
-pull-based batch cluster. The coordinator never connects to a worker, so the same
-NAT/firewall model as the LLM agent applies.
+- The current direct QUIC adapter connects exactly two capable private-IPv4 agents.
+  Other supported native transports can use multiple workers.
+- Live cluster membership and context are fixed at startup. Model switches and
+  larger contexts may require idle teardown; workloads are not silently evicted.
+- Chat queues and active streams are in memory. Unexpected coordinator restarts
+  lose those sessions. Planned idle QUIC handoff preserves native processes;
+  it does not transfer in-flight requests or HTTP relay buffers.
+- Partially streamed responses cannot be automatically replayed. GPU reservations
+  stay held until completion or acknowledged teardown.
+- GPU allocation is memory telemetry, not compute utilization. Reported VRAM
+  does not account for every external application or guarantee native fit.
+- RPC and container workers belong on trusted hosts/networks; this is not a
+  hostile multi-tenant execution boundary.
 
-Install Python 3, `requests`, and Docker on a worker, then run:
+## Project map
 
-```bash
-python3 -m pip install requests
-export SWARM_AGENT_KEY='the agent key'
-python3 container_agent.py --coordinator https://sandbox.yerson.co/swarm/api
-```
+| Directory | Responsibility |
+| --- | --- |
+| `coordinator/` | API, admission, scheduling, claims, transport control and streaming |
+| `agents/` | Python/PowerShell workers and the QUIC adapter |
+| `ui/` | React/TypeScript dashboard |
+| `scripts/` | Client setup, health checks, trials and deployment helpers |
+| `tests/` | Coordinator and agent regression scenarios |
+| `infra/` | Optional disposable AWS GPU lab and budget relay module |
+| `docs/` | Architecture, setup, operations and performance guides |
 
-Queue a job with the admin key. `image` is an OCI/Docker registry reference (a
-tag or, preferably, an immutable digest), and artifact paths are relative to the
-container's `/workspace` directory:
-
-```bash
-curl -X POST https://sandbox.yerson.co/swarm/api/container/jobs \
-  -H "X-API-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
-  -d '{
-    "image": "alpine:3.20",
-    "command": ["sh", "-c", "echo hello > result.txt"],
-    "artifacts": ["result.txt"],
-    "timeout_sec": 300,
-    "cpus": 1,
-    "memory_mb": 256
-  }'
-```
-
-Use `GET /container/jobs`, `GET /container/jobs/{id}`, and
-`GET /container/jobs/{id}/artifacts` to inspect jobs and download the resulting
-`.tar.gz`. Network access is disabled unless a job explicitly sets `network` to
-`true`. Workers also enforce a read-only root filesystem, drop Linux capabilities,
-set `no-new-privileges`, and apply CPU, memory, PID, and wall-clock limits. This is
-useful batch isolation, but it is not a hostile multi-tenant security boundary;
-run untrusted workloads on dedicated worker hosts or stronger VM sandboxes.
-
-Agents and clients previously configured with `/api` must use `/swarm/api`.
-The HTTPS nginx server routes `/swarm/` to the gateway without stripping the
-prefix. See `nginx/sandbox-swarm.conf.example` for the required locations.
+Start with [architecture](docs/architecture.md),
+[distributed inference](docs/distributed-inference.md),
+[routing](docs/relay-routing.md) or [dashboard behavior](docs/controller-dashboard.md).
+The [AWS lab](infra/rpc-lab/README.md) and [optional relay](infra/relay/README.md)
+are Terraform-owned experiments with explicit cleanup; starting the local stack
+or client does not create cloud resources. Cloud relay use is disabled by default.

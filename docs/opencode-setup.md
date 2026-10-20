@@ -127,13 +127,16 @@ agent credentials to a client machine.
 
 Supply the URL with `--base-url` or `SWARM_BASE_URL`, or enter it at setup's prompt.
 The prompt offers the URL already saved in this checkout as a reusable default.
-Noninteractive setup requires one of those sources. The chosen URL is stored in
-the provider config; the key remains separate as described above. To change an
-existing credential, update its environment variable or private client file.
+Noninteractive setup requires one of those sources. The chosen URL is saved as
+`SWARM_BASE_URL` in ignored `.env.opencode`; existing private settings are retained.
+Setup and the launcher resolve this variable from the environment, then
+`.env.opencode`, then `.env`. To change an existing credential, update its
+environment variable or private client file.
 
-Generated JSON contains `{env:SWARM_CONSUMER_KEY}`, never the credential itself.
-Use the launcher so it loads the private credential into OpenCode's child process.
-If you run `opencode` directly, export `SWARM_CONSUMER_KEY` yourself.
+Generated JSON contains `{env:SWARM_BASE_URL}` and `{env:SWARM_CONSUMER_KEY}`,
+keeping both deployment details outside the shared profile. Use the launcher so
+it loads these settings into OpenCode's child process. If you run `opencode`
+directly, export both `SWARM_BASE_URL` and `SWARM_CONSUMER_KEY` yourself.
 
 Authentication or connection failures stop setup. The check refuses redirects
 and accepts HTTPS endpoints, plus HTTP on loopback for local development.

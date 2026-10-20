@@ -24,7 +24,7 @@ def update_timeout(source):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--site", type=Path, default=Path("/etc/nginx/sites-enabled/sandbox.yerson.co"))
+    parser.add_argument("--site", type=Path, required=True, help="Path to your existing nginx site configuration")
     parser.add_argument("--apply", action="store_true", help="Back up, install, validate, and reload; requires sudo")
     args = parser.parse_args()
     before = args.site.read_text()

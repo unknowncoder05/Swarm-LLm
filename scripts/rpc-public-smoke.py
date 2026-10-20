@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 import urllib.error
 import urllib.request
+from gen_opencode_config import load_base_url
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,7 +21,7 @@ def main():
     key = values.get("CONSUMER_KEY")
     if not key:
         raise SystemExit("CONSUMER_KEY is required")
-    url = "https://sandbox.yerson.co/swarm/api/v1/chat/completions"
+    url = load_base_url(ROOT).rstrip("/") + "/chat/completions"
     result = {"model": "qwen3:30b-a3b", "url": url,
               "started_at": datetime.now(timezone.utc).isoformat()}
     payload = {"model": result["model"], "stream": False,

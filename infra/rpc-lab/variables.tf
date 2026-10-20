@@ -74,7 +74,7 @@ variable "gpu_ami_id" {
 }
 
 variable "agent_source_path" {
-  description = "Optional path to a reviewed RPC-capable agent.py. Null uses the captured lab snapshot, since the separate agent checkout is ignored by this repository."
+  description = "Optional path to a reviewed RPC-capable agent.py. Null uses the captured lab snapshot, independent of the current agent sources."
   type        = string
   default     = null
 }

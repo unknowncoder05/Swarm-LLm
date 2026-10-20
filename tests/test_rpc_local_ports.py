@@ -9,7 +9,7 @@ from test_agent_reports import ROOT, load
 
 class RpcLocalPortTests(unittest.TestCase):
     def setUp(self):
-        self.a = load("local_port_agent", ROOT / "agent/agent.py")
+        self.a = load("local_port_agent", ROOT / "agents/agent.py")
         self.addCleanup(self.a._stop_rpc_relays)
 
     def test_reserved_coordinator_hint_is_never_bound_and_socket_stays_owned(self):

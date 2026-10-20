@@ -56,7 +56,7 @@ def main():
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.load(response)
 
-    source = (ROOT / "agent/agent.py").read_text(encoding="utf-8")
+    source = (ROOT / "agents/agent.py").read_text(encoding="utf-8")
     revisions = {hashlib.sha256(source.encode()).hexdigest(),
                  hashlib.sha256(source.replace("\n", "\r\n").encode()).hexdigest()}
 

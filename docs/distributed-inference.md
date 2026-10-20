@@ -49,7 +49,7 @@ flowchart LR
    translates the request to native OpenAI format, and submits a fenced result.
    Updated primaries also publish incremental events for streamed requests.
 7. The coordinator signals dissolution after the configured idle window (five
-   minutes by default; 15 minutes in the restored Spain deployment). Agents terminate
+   minutes by default; 15 minutes with the example environment settings). Agents terminate
    llama.cpp, report `/agent/rpc/done`, and restart Ollama. Formation and consumer
    waits have a 30-minute timeout, extended to 60 minutes for relay transport.
 
@@ -102,7 +102,7 @@ feature in the Swarm scheduler.
   UDP works without inbound TCP. It requires no administrator access or cloud
   relay; an explicit trial preserves the existing default routing policy.
 - With `rpc_transport: "direct"`, the primary must reach every worker's assigned TCP port. All workers being
-  able to reach the coordinator is insufficient. University Wi-Fi isolation,
+  able to reach the coordinator is insufficient. Network isolation,
   NAT across sites, and unrelated private networks can prevent RPC connections.
 - Set top-level `rpc_transport: "relay"` on the first model request when direct
   connectivity is blocked. Both Python agents make authenticated outbound HTTPS
@@ -112,7 +112,7 @@ feature in the Swarm scheduler.
   so its bandwidth and latency affect loading and generation. It still does
   not execute model layers.
 - A Terraform-managed [relay](../infra/relay/README.md) can carry
-  model bytes near the campus while the existing coordinator schedules jobs.
+  model bytes near the worker network while the existing coordinator schedules jobs.
   The optional [local provisioner](relay-provisioning.md) lets the
   coordinator create the relay on first multi-GPU demand and destroy its
   Terraform resources after idle use. AWS credentials stay on the existing
@@ -149,12 +149,12 @@ free memory. Check llama.cpp device allocation logs and GPU memory use.
 ## Known limitations in the application
 
 The current Python implementation addresses the original review and subsequent
-campus trials. Remaining limitations are:
+worker network trials. Remaining limitations are:
 
 1. The separate legacy `llama-rpc.ps1` still expects `llama-rpc-server`. Python
    now uses `ggml-rpc-server`, pins the shared `b11612` revision, and installs
    both Windows CUDA 12.4 binary and runtime archives using direct URLs, avoiding
-   university NAT GitHub API rate limits. Its Linux installer still assumes ZIP
+   shared NAT GitHub API rate limits. Its Linux installer still assumes ZIP
    assets and does not reliably select a CUDA build.
 2. Python now resolves `%USERPROFILE%/.ollama/models` and honors `OLLAMA_MODELS`.
    It does not discover a separate Linux service account's model store or an
@@ -181,18 +181,14 @@ campus trials. Remaining limitations are:
    or process-supervision scheduler.
 
 The Python agent automatically joins coordinator-assigned clusters. The separate
-`agent/llama-rpc.ps1` implements manually configured primary/worker roles and
+`agents/llama-rpc.ps1` implements manually configured primary/worker roles and
 worker addresses. Ordinary `agent.ps1` does not implement automatic RPC roles.
 
-The reviewed `agent/` directory is an ignored, separate Git checkout with local
-RPC changes. The public `/swarm/agent/agent.py` download used by this deployment
-is served by the gateway from that local checkout. Compose now mounts the same
-checkout read-only into the coordinator and sets `AGENT_SOURCE_PATH`, so its
-authenticated `/agent/agent.py` endpoint serves the same reviewed source. A
-missing configured source returns 503 instead of falling back to older upstream
-code. Deployments without that setting retain the upstream fetch behavior.
-The AWS lab preserves the original reviewed
-agent snapshot; production Python improvements do not change that snapshot.
+The reviewed `agents/` sources are included in this repository. The public
+`/swarm/agent/agent.py` download and authenticated `/agent/agent.py` route serve
+the same read-only mounted source. Missing configured source returns 503.
+Operators without that mount may explicitly configure `AGENT_SOURCE_URL`.
+The AWS lab keeps its separate captured source and adapters.
 
 Windows agents hold a per-user, per-Ollama-port process lock. A healthy existing
 Ollama server is reused, and supervised updates let the watchdog restart the

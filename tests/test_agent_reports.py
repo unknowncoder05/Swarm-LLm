@@ -24,7 +24,7 @@ def load(name, path):
 class AgentReports(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.agent = load("report_test_agent", ROOT / "agent" / "agent.py")
+        cls.agent = load("report_test_agent", ROOT / "agents" / "agent.py")
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -75,7 +75,7 @@ class AgentReports(unittest.TestCase):
         self.assertEqual(saved["phase"], "ERROR")
         self.assertIn("disk_free_gb", saved["diagnostics"])
         # Load a new module to model an actual watchdog restart.
-        restarted = load("report_test_restarted", ROOT / "agent" / "agent.py")
+        restarted = load("report_test_restarted", ROOT / "agents" / "agent.py")
         restarted._coordinator, restarted._api_key = self.agent._coordinator, self.agent._api_key
         with patch.object(restarted, "_report_outbox", return_value=Path(self.temp.name)), \
              patch.object(restarted.requests, "post", return_value=Mock()) as post:
@@ -103,7 +103,7 @@ class AgentReports(unittest.TestCase):
 
     def test_entrypoint_reports_startup_failure_and_exits_nonzero(self):
         import ast
-        source = ast.parse((ROOT / "agent" / "agent.py").read_text())
+        source = ast.parse((ROOT / "agents" / "agent.py").read_text())
         entrypoint = source.body[-1]
         main = Mock(side_effect=RuntimeError("startup pull failed"))
         report = Mock()
@@ -117,7 +117,7 @@ class AgentReports(unittest.TestCase):
         root = Path(self.temp.name)
         child_code = (
             "import importlib.util,sys; from pathlib import Path; "
-            f"spec=importlib.util.spec_from_file_location('worker',{str(ROOT / 'agent' / 'agent.py')!r}); "
+            f"spec=importlib.util.spec_from_file_location('worker',{str(ROOT / 'agents' / 'agent.py')!r}); "
             "worker=importlib.util.module_from_spec(spec); spec.loader.exec_module(worker); "
             f"worker._context_paths=lambda: {{'root':Path({str(root)!r})}}; "
             "sys.exit(0 if worker._acquire_instance_lock(int(sys.argv[1])) else 23)"
@@ -383,11 +383,11 @@ class CoordinatorReports(unittest.TestCase):
 
     def test_lan_address_survives_coordinator_restart(self):
         self.client.post("/register", json={"agent_id": "worker-1", "port": 11434,
-            "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": "10.8.16.153"},
+            "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": "10.0.0.153"},
             headers=self.agent_headers)
         self.coordinator._init_db()
         restored = self.coordinator._load_machines()
-        self.assertEqual(restored["worker-1"].lan_ip, "10.8.16.153")
+        self.assertEqual(restored["worker-1"].lan_ip, "10.0.0.153")
         self.assertFalse(restored["worker-1"].alive)
 
     def test_legacy_gpu_registration_refreshes_missing_lan_on_heartbeat(self):
@@ -398,7 +398,7 @@ class CoordinatorReports(unittest.TestCase):
         response = self.client.post("/heartbeat", json=heartbeat, headers=self.agent_headers)
         self.assertEqual(response.status_code, 404)
         self.client.post("/register", json={"agent_id": "worker-1", "port": 11434,
-            "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": "10.8.16.153"},
+            "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": "10.0.0.153"},
             headers=self.agent_headers)
         response = self.client.post("/heartbeat", json=heartbeat, headers=self.agent_headers)
         self.assertEqual(response.status_code, 200)
@@ -406,17 +406,17 @@ class CoordinatorReports(unittest.TestCase):
     def test_rpc_cluster_uses_two_gpus_private_addresses_and_requested_context(self):
         for idx in (1, 2):
             self.client.post("/register", json={"agent_id": f"worker-{idx}", "port": 11434,
-                "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": f"10.8.16.{150+idx}"},
+                "model": "qwen3:14b", "gpu_vram_gb": 12, "lan_ip": f"10.0.0.{150+idx}"},
                 headers=self.agent_headers)
         cluster = self.coordinator._form_rpc_cluster("qwen3:30b-a3b", 19, ctx_size=2048)
         self.assertEqual(cluster.primary_id, "worker-1")
         self.assertEqual(cluster.worker_ids, ["worker-2"])
         primary = self.coordinator.agent_rpc_assignments["worker-1"]
         worker = self.coordinator.agent_rpc_assignments["worker-2"]
-        self.assertEqual(primary["workers"], ["10.8.16.152:50052"])
+        self.assertEqual(primary["workers"], ["10.0.0.152:50052"])
         self.assertEqual(primary["ctx_size"], 2048)
-        self.assertEqual(worker["listen_host"], "10.8.16.152")
-        self.assertEqual(worker["primary_ip"], "10.8.16.151")
+        self.assertEqual(worker["listen_host"], "10.0.0.152")
+        self.assertEqual(worker["primary_ip"], "10.0.0.151")
 
     def test_stale_rpc_done_cannot_remove_a_new_assignment(self):
         self.coordinator.agent_rpc_assignments["worker-1"] = {"cluster_id": "new"}

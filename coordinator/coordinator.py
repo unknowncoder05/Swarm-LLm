@@ -13,7 +13,7 @@ Endpoints and required key:
   POST /v1/chat/completions        — CONSUMER_KEY or ADMIN_KEY
 
 Architecture: pull-based. Agents poll for work; coordinator never
-connects to agents. Works through NAT/university firewalls.
+connects to agents. Works through NAT/restricted firewalls.
 
 Security measures:
   - Three-key auth with constant-time comparison (no timing attacks)
@@ -1582,13 +1582,13 @@ app.add_middleware(
 
 # ── agent auto-update ─────────────────────────────────────────────────────────
 
-_AGENT_PY_URL = "https://raw.githubusercontent.com/unknowncoder05/swarm-llm-agent/main/agent.py"
+_AGENT_PY_URL = os.environ.get("AGENT_SOURCE_URL", "")
 _latest_agent_py: Optional[str] = None
 
 async def _agent_update_loop():
     global _latest_agent_py
-    if os.environ.get("AGENT_SOURCE_PATH"):
-        return  # this deployment serves its mounted, reviewed agent source
+    if os.environ.get("AGENT_SOURCE_PATH") or not _AGENT_PY_URL:
+        return  # source must be mounted or explicitly configured by the operator
     import urllib.request
     while True:
         try:

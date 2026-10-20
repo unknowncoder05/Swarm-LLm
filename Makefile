@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := help
 COMPOSE       := docker compose
 ENV_FILE      := .env
+SWARM_API     ?= $(shell python3 -c 'from scripts.gen_opencode_config import load_base_url; print(load_base_url().rsplit("/v1", 1)[0])')
+SWARM_ROOT    = $(patsubst %/api,%,$(SWARM_API))
 
 # ── colour helpers ────────────────────────────────────────────────────────────
 BOLD  := \033[1m
@@ -20,15 +22,7 @@ check-env:
 
 .PHONY: init
 init: ## Create .env from .env.example with fresh random keys for all three roles
-	@test -f $(ENV_FILE) && echo ".env already exists (delete it first to regenerate)" && exit 0 || true
-	@ADMIN=$$(openssl rand -hex 16); \
-	  AGENT=$$(openssl rand -hex 16); \
-	  CONSUMER=$$(openssl rand -hex 16); \
-	  printf "ADMIN_KEY=$$ADMIN\nAGENT_KEY=$$AGENT\nCONSUMER_KEY=$$CONSUMER\n" > $(ENV_FILE); \
-	  echo "$(GREEN)Generated .env$(RESET)"; \
-	  echo "  ADMIN_KEY    = $$ADMIN   (dashboard + all endpoints)"; \
-	  echo "  AGENT_KEY    = $$AGENT   (agent machines only)"; \
-	  echo "  CONSUMER_KEY = $$CONSUMER   (LLM API consumers)"
+	@python3 scripts/init-env.py --output "$(ENV_FILE)"
 
 .PHONY: keygen
 keygen: ## Print a new random API key (does not write to .env)
@@ -170,7 +164,7 @@ goose: check-env ## Launch an interactive Goose session against the swarm
 	@CONSUMER_KEY=$$(grep ^CONSUMER_KEY $(ENV_FILE) | cut -d= -f2); \
 	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/swarm/api/v1/models \
 	    | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print(d[0]['id'] if d else 'qwen3:14b')" 2>/dev/null); \
-	  OPENAI_BASE_URL=https://sandbox.yerson.co/swarm/api/v1 \
+	  OPENAI_BASE_URL=$(SWARM_API)/v1 \
 	  OPENAI_API_KEY=$$CONSUMER_KEY \
 	  GOOSE_PROVIDER=openai \
 	  GOOSE_MODEL=$$MODEL \
@@ -206,19 +200,19 @@ agent-cmd: check-env ## Print the PowerShell one-liner to run on a Windows machi
 	  echo ""; \
 	  echo "$(CYAN)Run this in cmd.exe on the target machine (interactive wizard):$(RESET)"; \
 	  echo ""; \
-	  echo "  powershell -ExecutionPolicy Bypass -c \"iwr 'https://sandbox.yerson.co/swarm/agent/agent.ps1' | iex\""; \
+	  echo "  powershell -ExecutionPolicy Bypass -c \"iwr '$(SWARM_ROOT)/agent/agent.ps1' | iex\""; \
 	  echo ""; \
 	  echo "$(CYAN)Or non-interactive with explicit params:$(RESET)"; \
 	  echo ""; \
-	  echo "  .\\agent.ps1 -Coordinator https://sandbox.yerson.co/swarm/api -ApiKey $$AGENT_KEY -Model qwen2.5-coder:1.5b"
+	  echo "  .\\agent.ps1 -Coordinator $(SWARM_API) -ApiKey $$AGENT_KEY -Model qwen2.5-coder:1.5b"
 
 .PHONY: agent-build
 agent-build: ## Rebuild agent-standalone.cmd from agent.ps1 (single distributable file)
 	@python3 -c "\
-	src = open('agent/agent.ps1').read(); \
+	src = open('agents/agent.ps1').read(); \
 	hdr = '@(set \"Z=%~f0\")& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command \"iex([io.file]::ReadAllText(\$\$env:Z))\" & exit /b\n<# --- batch header above is a PowerShell block comment ---\n'; \
-	open('agent/agent-standalone.cmd','w',encoding='utf-8').write(hdr + src + '\n#>'); \
-	print('$(GREEN)Built agent/agent-standalone.cmd$(RESET)')"
+	open('agents/agent-standalone.cmd','w',encoding='utf-8').write(hdr + src + '\n#>'); \
+	print('$(GREEN)Built agents/agent-standalone.cmd$(RESET)')"
 
 .PHONY: ollama-mirror
 ollama-mirror: ## Download latest Ollama portable zip + installer into ./mirror/
@@ -240,15 +234,6 @@ ollama-mirror: ## Download latest Ollama portable zip + installer into ./mirror/
 	    echo "$$LATEST" > mirror/.ollama-version && \
 	    echo "$(GREEN)mirror/ updated to $$LATEST$(RESET)"; \
 	  fi
-
-.PHONY: make-launcher
-make-launcher: check-env ## Generate a pre-encoded .cmd launcher for locked-down machines
-	@API_KEY=$$(grep API_KEY $(ENV_FILE) | cut -d= -f2); \
-	  powershell -ExecutionPolicy Bypass -File agent/make_encoded_launcher.ps1 \
-	    -Coordinator https://sandbox.yerson.co/swarm/api \
-	    -ApiKey $$API_KEY \
-	    -Model qwen2.5-coder:1.5b 2>/dev/null || \
-	  echo "$(YELLOW)PowerShell not available on this machine. Run make_encoded_launcher.ps1 on Windows.$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Cleanup

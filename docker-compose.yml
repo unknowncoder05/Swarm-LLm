@@ -23,7 +23,7 @@ services:
       RPC_IDLE_TIMEOUT_SEC: ${RPC_IDLE_TIMEOUT_SEC:-300}
     volumes:
       - coordinator-data:/data
-      - ./agent:/opt/swarm:ro
+      - ./agents:/opt/swarm:ro
     expose:
       - "8080"
     extra_hosts:
@@ -32,8 +32,7 @@ services:
       - swarm
 
   # ── gateway: dashboard and API under /swarm on localhost:8081 ────────────
-  # TLS terminated upstream by sandbox.yerson.co's reverse proxy.
-  # sandbox.yerson.co/swarm/* → :8081/swarm/*
+  # TLS may be terminated upstream by the deployment's reverse proxy.
   gateway:
     image: nginx:alpine
     restart: unless-stopped
@@ -41,8 +40,9 @@ services:
       - "127.0.0.1:8081:8081"
     volumes:
       - ./nginx/gateway.conf:/etc/nginx/conf.d/gateway.conf:ro
+      - ./nginx/local.d:/etc/nginx/swarm-local:ro
       - ./mirror:/srv/ollama:ro
-      - ./agent:/srv/agent:ro
+      - ./agents:/srv/agent:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

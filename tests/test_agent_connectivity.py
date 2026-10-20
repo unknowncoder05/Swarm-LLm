@@ -13,11 +13,11 @@ from test_agent_reports import ROOT, load
 
 class ConnectivityTests(unittest.TestCase):
     def setUp(self):
-        self.a = load("connectivity_agent", ROOT / "agent/agent.py")
+        self.a = load("connectivity_agent", ROOT / "agents/agent.py")
         self.plan = {"run_id": str(uuid.uuid4()), "token": "a" * 32,
                      "created_at": time.time(), "expires_at": time.time() + 10,
-                     "agents": [{"agent_id": "one", "ip": "10.8.16.113"},
-                                {"agent_id": "two", "ip": "10.8.16.112"}]}
+                     "agents": [{"agent_id": "one", "ip": "10.0.0.113"},
+                                {"agent_id": "two", "ip": "10.0.0.112"}]}
 
     def test_manifest_rejects_expired_unselected_public_and_unbounded_targets(self):
         own, peer = self.a._validate_lan_probe(self.plan, "one")
@@ -34,7 +34,7 @@ class ConnectivityTests(unittest.TestCase):
             self.a._validate_lan_probe(self.plan, "other")
 
     def test_two_real_listeners_connect_both_directions_then_close(self):
-        agents = [self.a, load("connectivity_peer", ROOT / "agent/agent.py")]
+        agents = [self.a, load("connectivity_peer", ROOT / "agents/agent.py")]
         lock = threading.Lock(); results = {}; errors = []; captured = {}
         def publish(identity, result):
             with lock:

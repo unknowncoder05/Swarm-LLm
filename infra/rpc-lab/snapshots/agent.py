@@ -1926,7 +1926,7 @@ def work_loop(ollama_exe, coordinator, api_key, port, vram_gb):
                     ms        = round((time.time() - t0) * 1000, 1)
                     post_body = f'{{"result":{raw_result},"elapsed_ms":{ms}}}'
                     # For fast jobs (<5s) no cancel-check fires during inference, leaving
-                    # the Madrid campus NAT path "cold".  A warm-up GET refreshes the NAT
+                    # the shared NAT path "cold".  A warm-up GET refreshes the NAT
                     # state so the result POST isn't reset.
                     try:
                         requests.get(

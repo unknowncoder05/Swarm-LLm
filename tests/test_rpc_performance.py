@@ -68,7 +68,7 @@ class PerformanceTests(SchedulingFixture):
 
 class NativePerformanceTests(unittest.TestCase):
     def test_offload_report_uses_the_current_process_log_only(self):
-        agent = load("offload_report_agent", ROOT / "agent/agent.py")
+        agent = load("offload_report_agent", ROOT / "agents/agent.py")
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "native.log"
             old = b"offloaded 49/49 layers\n"
@@ -77,7 +77,7 @@ class NativePerformanceTests(unittest.TestCase):
                 self.assertEqual(agent._read_rpc_offload_info(), (48, 49))
 
     def test_native_runtime_flags_do_not_accept_arbitrary_arguments(self):
-        agent = load("performance_agent", ROOT / "agent/agent.py")
+        agent = load("performance_agent", ROOT / "agents/agent.py")
         self.assertEqual(agent._rpc_runtime_arguments({"batch_size": 256, "ubatch_size": 128, "cache_ram": 0}),
             ["--batch-size", "256", "--ubatch-size", "128", "--cache-ram", "0"])
         for value in ({"ngl": 2}, {"batch_size": True}, {"ubatch_size": 512}, {"cache_ram": -1}):

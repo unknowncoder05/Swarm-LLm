@@ -20,7 +20,7 @@ The regional endpoint does not forward those bytes through Virginia.
 ## Resources and cost
 
 Terraform reads the account's **default VPC and default public subnet** and the
-existing `yerson.co` public DNS zone. It creates one `t4g.micro` with a normal
+existing public DNS zone supplied as `hosted_zone_name`. It creates one `t4g.micro` with a normal
 public IPv4 address, an encrypted 8 GB gp3 root disk, one security group and its
 rules, an SSM SecureString, the instance's IAM/SSM permissions, and one DNS record.
 It does not create a VPC, subnet, route table, NAT gateway, load balancer,
@@ -45,7 +45,7 @@ public IPv4 address is released. DNS, IAM, security-group, and SSM resources sta
 tracked until `terraform destroy`. The timer is a guest-side backstop, not a
 guaranteed total-spend cap or a substitute for Terraform cleanup.
 
-HTTPS is restricted to the campus and coordinator source CIDRs. Port 80 is open
+HTTPS is restricted to the worker network and coordinator source CIDRs. Port 80 is open
 for ACME certificate validation and HTTPS redirects. The native RPC and Python
 listeners bind only to loopback; management uses outbound SSM without SSH.
 The agent key authenticates data requests; a distinct generated control key
@@ -64,7 +64,9 @@ terraform -chdir=infra/relay/region apply region.tfplan
 ```
 
 Copy `terraform.tfvars.example` to a private ignored `terraform.tfvars` and
-supply the existing agent key and actual public source CIDRs. If an ignored
+supply the existing agent key, actual public source CIDRs, `hosted_zone_name`
+(for example `example.com`) and `dns_name` (for example `relay.example.com`).
+The DNS name must be one subdomain of that existing zone. If an ignored
 `terraform.auto.tfvars.json` already exists, it is the current private input;
 avoid keeping two conflicting input files. Terraform state and saved plans
 contain credentials and must also remain private.
@@ -79,7 +81,7 @@ terraform -chdir=infra/relay output deployment
 ```
 
 Wait for cloud-init, the relay service, DNS, and the public ACME certificate.
-The expected endpoint is `https://swarm-relay-es.yerson.co/healthz`.
+The expected endpoint is `https://relay.example.com/healthz`.
 Inspect failures through SSM and `/var/log/cloud-init-output.log`,
 `journalctl -u swarm-relay -u caddy`, and `systemctl list-timers`.
 
@@ -94,8 +96,8 @@ python3 scripts/configure-relay.py
 python3 scripts/configure-relay.py --apply
 # Wait for active requests to finish before restarting the coordinator.
 docker compose up -d --build coordinator
-python3 scripts/agent-health.py --hosts A506-BIBLIO-07 A506-BIBLIO-08
-python3 scripts/rpc-trial.py --transport relay --hosts A506-BIBLIO-07 A506-BIBLIO-08
+python3 scripts/agent-health.py --hosts GPU-NODE-01 GPU-NODE-02
+python3 scripts/rpc-trial.py --transport relay --hosts GPU-NODE-01 GPU-NODE-02
 ```
 
 For a coding session, also hold the native model for 15 minutes between requests:

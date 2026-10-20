@@ -1,4 +1,4 @@
-# Include these locations inside the HTTPS server for sandbox.yerson.co.
+# Include these locations inside the HTTPS server for swarm.example.com.
     # Swarm controller: dashboard, API, and agent downloads.
     location = /swarm {
         return 308 /swarm/;

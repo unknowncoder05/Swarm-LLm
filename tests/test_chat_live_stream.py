@@ -99,7 +99,7 @@ class LiveStreamTests(SchedulingFixture):
 class AgentStreamTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.agent = load("streaming_agent", ROOT / "agent/agent.py")
+        cls.agent = load("streaming_agent", ROOT / "agents/agent.py")
 
     def test_stream_assembly_preserves_reasoning_multiple_tools_unicode_and_usage(self):
         chunks = [

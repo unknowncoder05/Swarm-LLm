@@ -142,7 +142,7 @@ class RecoveryTests(SchedulingFixture):
 
 class AgentPreflightTests(unittest.TestCase):
     def setUp(self):
-        self.a=load('preflight_agent_under_test',ROOT/'agent/agent.py')
+        self.a=load('preflight_agent_under_test',ROOT/'agents/agent.py')
 
     def test_primary_failed_route_never_downloads_or_launches_model(self):
         a=self.a;assignment=dict(cluster_id='pair',model='qwen3:30b-a3b',role='primary',transport='quic',preflight_required=True)

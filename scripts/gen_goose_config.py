@@ -1,5 +1,8 @@
 """Generate ~/.config/goose/config.yaml pointing at the swarm endpoint."""
 import json, os, sys, urllib.request
+from gen_opencode_config import load_base_url
+
+base_url = load_base_url()
 
 env = {}
 try:
@@ -20,7 +23,7 @@ if not key:
 live_model = None
 try:
     req = urllib.request.Request(
-        "http://localhost:8081/swarm/api/v1/models",
+        base_url.rstrip("/") + "/models",
         headers={"X-API-Key": key},
     )
     data = json.loads(urllib.request.urlopen(req, timeout=3).read())
@@ -104,11 +107,11 @@ extensions:
 
 providers:
   openai:
-    base_url: https://sandbox.yerson.co/swarm/api/v1
+    base_url: {base_url}
     api_key: {key}
 
 # Environment variables (picked up by goose at runtime)
-OPENAI_BASE_URL: https://sandbox.yerson.co/swarm/api/v1
+OPENAI_BASE_URL: {base_url}
 OPENAI_API_KEY: {key}
 """
 

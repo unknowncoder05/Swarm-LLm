@@ -14,9 +14,9 @@ import urllib.request
 from pathlib import Path
 
 try:
-    from gen_opencode_config import build_config, load_consumer_key, merge_config, update_config, write_private
+    from gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, save_client_settings, update_config, write_private
 except ModuleNotFoundError:
-    from scripts.gen_opencode_config import build_config, load_consumer_key, merge_config, update_config, write_private
+    from scripts.gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, save_client_settings, update_config, write_private
 
 ROOT = Path(__file__).resolve().parents[1]
 # Match the CLI used for the repository's integration checks.
@@ -106,6 +106,9 @@ def main(argv=None):
     try:
         saved_provider = from_config.get("provider", {}).get("swarm-llm", {})
         saved_url = saved_provider.get("options", {}).get("baseURL", "")
+        if saved_url == BASE_URL_ENV:
+            saved_url = ""
+        saved_url = load_base_url(ROOT, default=saved_url)
         base_url = args.base_url or os.environ.get("SWARM_BASE_URL")
         if not base_url and sys.stdin.isatty():
             base_url = input("Swarm API base URL%s: " % (" [%s]" % saved_url if saved_url else "")).strip() or saved_url
@@ -146,7 +149,7 @@ def main(argv=None):
     if args.title_model:
         names = list(dict.fromkeys([*names, args.title_model]))
     window = args.context or saved_provider.get("models", {}).get("qwen3:30b-a3b", {}).get("limit", {}).get("context", 32768)
-    config = build_config(model, base_url, window, advertised=names)
+    config = build_config(model, BASE_URL_ENV, window, advertised=names)
     if args.title_model:
         config["agent"] = {"title": {"model": "swarm-llm/" + args.title_model}}
     for name, profile in config["provider"]["swarm-llm"]["models"].items():
@@ -171,8 +174,7 @@ def main(argv=None):
     version = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True, timeout=30)
     try:
         update_config(path, config)
-        if prompted:
-            write_private(ROOT / ".env.opencode", "SWARM_CONSUMER_KEY=" + json.dumps(key) + "\n")
+        save_client_settings(ROOT, base_url, key if prompted else None)
     except (OSError, ValueError) as exc:
         parser.error("Cannot update OpenCode configuration (%s)" % type(exc).__name__)
     window = config["provider"]["swarm-llm"]["models"][model].get("limit", {}).get("context", "custom")

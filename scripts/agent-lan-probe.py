@@ -55,7 +55,7 @@ def main():
     dest = ROOT / ".rpc-trial" / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-lan-probe")
     dest.mkdir(parents=True)
     run_id = str(uuid.uuid4())
-    manifest = ROOT / "agent/lan-probe.json"
+    manifest = ROOT / "agents/lan-probe.json"
     if manifest.exists() and json.loads(manifest.read_text()).get("expires_at", 0) > time.time():
         raise RuntimeError("A connectivity probe is already scheduled")
     result = {"run_id": run_id, "status": "waiting", "transport": args.transport, "agents": [{k: m[k] for k in ("hostname", "agent_id", "lan_ip")} for m in nodes], "observations": []}
@@ -72,7 +72,7 @@ def main():
         finally:
             if os.path.exists(name): os.unlink(name)
     try:
-        expected = hashlib.sha256((ROOT / "agent/agent.py").read_text().replace("\r\n", "\n").encode()).hexdigest()
+        expected = hashlib.sha256((ROOT / "agents/agent.py").read_text().replace("\r\n", "\n").encode()).hexdigest()
         until = time.monotonic() + args.wait_seconds
         while True:
             nodes = [m for m in state()["machines"] if m.get("agent_id") in ids]

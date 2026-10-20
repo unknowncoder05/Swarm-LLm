@@ -1,5 +1,7 @@
 # Copy to terraform.tfvars (ignored) and replace placeholders. Keep it private.
+hosted_zone_name    = "example.com"
+dns_name            = "relay.example.com"
 agent_key           = "<existing Swarm AGENT_KEY>"
-allowed_https_cidrs = ["<campus public IPv4>/32", "<coordinator public IPv4>/32"]
+allowed_https_cidrs = ["<worker network public IPv4>/32", "<coordinator public IPv4>/32"]
 instance_type       = "t4g.micro"
 max_runtime_hours   = 4

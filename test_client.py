@@ -18,10 +18,11 @@ import time
 import urllib.request
 import urllib.error
 import ssl
+from scripts.gen_opencode_config import load_base_url
 
 # ── config ────────────────────────────────────────────────────────────────────
 
-COORDINATOR = "https://sandbox.yerson.co/swarm/api"
+COORDINATOR = load_base_url().rsplit("/v1", 1)[0]
 ENV_FILE    = os.path.join(os.path.dirname(__file__), ".env")
 TIMEOUT     = 600   # seconds to wait for a machine to register
 TEST_PROMPT = (

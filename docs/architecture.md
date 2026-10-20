@@ -49,8 +49,8 @@ and Terraform operation.
 | `coordinator/chat_stream.py` | Bounded event ingestion, sequence checks, claim validation and SSE chunk normalization |
 | `coordinator/rpc_performance.py` | Allowlisted native settings and model-specific configuration validation |
 | `coordinator/rpc_handoff.py` | One-use validation and restoration of idle QUIC cluster metadata |
-| `agent/agent.py` | Per-user installation/watchdog, model and runtime setup, workload execution, reporting, RPC roles and incremental result publication |
-| `agent/quic_transport.py` | Peer TLS verification, reliable QUIC streams and bounded native TCP adapters |
+| `agents/agent.py` | Per-user installation/watchdog, model and runtime setup, workload execution, reporting, RPC roles and incremental result publication |
+| `agents/quic_transport.py` | Peer TLS verification, reliable QUIC streams and bounded native TCP adapters |
 | `ui/src/MachineActivity.tsx`, `ui/src/machine-state.ts` | Runtime-derived loaded models, replica state, download progress and GPU-memory presentation |
 | `ui/src/chat-request.ts` | Cancellable, bounded waiting for explicitly rejected GPU capacity; no automatic replay of accepted inference |
 | `scripts/setup-opencode.py`, `gen_opencode_config.py`, `run-opencode.py` | Live model discovery, client configuration and private credential loading |
@@ -143,13 +143,11 @@ not compute utilization. See [agent reporting](agent-failure-reports.md) and
 
 ## Repository and infrastructure ownership
 
-`agent/` is an ignored separate Git checkout. Commit and deploy its Python agent,
-QUIC helper and documentation together; the coordinator repository does not
-vendor that checkout. Both public agent downloads and the coordinator's
-authenticated source endpoint use the same mounted directory. The Python agent
-pins its QUIC helper by SHA-256. See [recorded agent revision](agent-source.md)
-when reproducing this release. The AWS lab's historical snapshot is intentionally
-separate from the current production agent.
+`agents/` contains the reviewed source needed by a fresh checkout. Both public
+agent downloads and the coordinator's authenticated source endpoint use the same
+read-only mounted directory. The Python agent pins its QUIC helper by SHA-256;
+see [agent source checksums](agent-source.md). The GPU lab's captured snapshot is
+intentionally separate from the current agent.
 
 `infra/rpc-lab` owns the disposable real-GPU experiment and `infra/relay` owns the
 optional budget relay. Terraform owns their cloud resources; neither documentation

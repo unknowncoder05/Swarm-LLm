@@ -74,7 +74,7 @@ describes the application path under test.
   with 1 ms additional egress delay on each GPU node. Internet downloads are not
   shaped. Set `peer_network_mbps = 0` for the unshaped AWS network. This approximates
   a wired LAN; fractional L4s/T4s differ from the project's RTX 4070/5070 machines,
-  and this does not reproduce university firewalls or Windows startup behavior.
+  and this does not reproduce restricted-network firewalls or Windows startup behavior.
 - Both nodes download the model, so either can become primary. They compile the
   same pinned CUDA/RPC llama.cpp revision. Compilation and downloads count toward
   the run-time budget; allow roughly 20–75 minutes for preparation, depending on
@@ -177,11 +177,10 @@ package/model downloads without a NAT gateway; there is no public ingress.
 
 ## Deliberate adaptations to the application
 
-The uploaded `coordinator.py` comes directly from this checkout. The agent is
-captured in [snapshots/agent.py](snapshots/agent.py), because `agent/` is a
-separate Git checkout ignored by the main repository. Its reviewed working tree
-includes RPC code absent from its base commit, so fetching that base alone
-would not reproduce this experiment. See [snapshot provenance](snapshots/README.md).
+The uploaded `coordinator.py` comes directly from this checkout. The lab uses the
+captured [snapshot](snapshots/agent.py) to keep its reference experiment repeatable
+while the current agent in `agents/` evolves. See
+[snapshot details](snapshots/README.md).
 Set `agent_source_path` to a reviewed local agent file to test a newer version.
 Both source content hashes contribute to the recorded source revision.
 Production files are not rewritten. The experiment applies a small adapter in

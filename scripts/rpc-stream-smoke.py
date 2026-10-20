@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 import urllib.request
 
-from gen_opencode_config import load_consumer_key
+from gen_opencode_config import BASE_URL_ENV, load_base_url, load_consumer_key
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,6 +20,8 @@ def main():
     args = parser.parse_args()
     config = json.loads((ROOT / "opencode.json").read_text())
     base = args.base_url or config["provider"]["swarm-llm"]["options"]["baseURL"]
+    if base == BASE_URL_ENV:
+        base = load_base_url(ROOT)
     key = load_consumer_key(ROOT)
     if not key:
         parser.error("A consumer key is required")

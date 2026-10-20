@@ -59,7 +59,7 @@ def main():
         print(json.dumps({"hosts": args.hosts, "profiles": {p: PROFILES[p] for p in args.profiles},
                           "context": 32768, "model": MODEL, "repeats": args.repeats}))
         return 0
-    expected = hashlib.sha256((ROOT / "agent/agent.py").read_bytes()).hexdigest()
+    expected = hashlib.sha256((ROOT / "agents/agent.py").read_bytes()).hexdigest()
     if any((m.get("runtime") or {}).get("agent_revision") != expected or
            not (m.get("runtime") or {}).get("rpc_tuning") for m in nodes):
         raise RuntimeError("Selected agents must be safely updated before tuning")

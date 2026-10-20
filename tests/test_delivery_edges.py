@@ -90,7 +90,7 @@ class DeliveryEdgeTests(SchedulingFixture):
     async def test_actual_agent_recovers_dropped_claim_response_and_dropped_result_ack(self):
         machine = self.machine("gpu")
         job = self.enqueue()
-        agent = load("real_delivery_agent", ROOT / "agent/agent.py")
+        agent = load("real_delivery_agent", ROOT / "agents/agent.py")
         agent._agent_id = "gpu"
         loop = asyncio.get_running_loop()
         claim_calls, result_calls = [], []
@@ -218,7 +218,7 @@ class DeliveryEdgeTests(SchedulingFixture):
 
 class AgentDeliveryTests(unittest.TestCase):
     def setUp(self):
-        self.a = load("delivery_agent", ROOT / "agent/agent.py")
+        self.a = load("delivery_agent", ROOT / "agents/agent.py")
         self.a._agent_id = "gpu"
 
     def response(self, status=200, body=None):

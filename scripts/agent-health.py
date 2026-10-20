@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 import urllib.error
 import urllib.request
+from gen_opencode_config import load_base_url
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8081/swarm/api")
-    parser.add_argument("--public-url", default="https://sandbox.yerson.co/swarm")
+    parser.add_argument("--public-url", default=load_base_url(ROOT).rsplit("/api/v1", 1)[0])
     parser.add_argument("--hosts", nargs="+", help="Audit these hostnames; otherwise all live GPU agents")
     parser.add_argument("--expected-machines", type=int, default=2)
     parser.add_argument("--wait-seconds", type=int, default=360)
@@ -53,7 +54,7 @@ def main():
     def digest(raw):
         return hashlib.sha256(raw.decode("utf-8").replace("\r\n", "\n").encode()).hexdigest()
 
-    expected_revision = digest((ROOT / "agent/agent.py").read_bytes())
+    expected_revision = digest((ROOT / "agents/agent.py").read_bytes())
     result = {"started_at": datetime.now(timezone.utc).isoformat(), "revision": expected_revision, "checks": []}
     def check(name, passed, detail=None):
         row = {"check": name, "passed": bool(passed)}

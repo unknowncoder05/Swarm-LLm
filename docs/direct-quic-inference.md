@@ -36,7 +36,7 @@ Run the real two-machine trial from the coordinator host:
 
 ```sh
 python3 scripts/rpc-trial.py --transport quic --context 32768 \
-  --hosts A506-BIBLIO-07 A506-BIBLIO-08 --wait-seconds 900
+  --hosts GPU-NODE-01 GPU-NODE-02 --wait-seconds 900
 ```
 
 It waits for safely updated, idle agents, runs cold and warm inference checks,

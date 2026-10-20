@@ -7,6 +7,7 @@ import type { MachinesResponse, Machine, RpcCluster, UsageStats, MediaModel, Vid
 import { MachineModels, MachineStatus, ReplicaOverview } from "./MachineActivity";
 import { machineCluster } from "./machine-state";
 import { requestChatCompletion, type ChatPhase } from "./chat-request";
+import { deploymentUrls } from "./deployment";
 
 const POLL_MS = 3000;
 const LS_KEY  = "swarm_admin_key";
@@ -28,23 +29,25 @@ function apiFetch(path: string, key: string) {
 
 // ── login screen ──────────────────────────────────────────────────────────────
 
-const COORDINATOR_URL = "https://sandbox.yerson.co/swarm/api";
+const deployment = deploymentUrls(window.location.origin);
+const COORDINATOR_URL = deployment.api;
+const AGENT_DOWNLOAD_URL = deployment.agent;
 
 const JOIN_COMMANDS: Record<string, { label: string; cmd: string }[]> = {
   windows: [
     {
       label: "CMD — download & install",
-      cmd: `curl.exe -fsSL https://sandbox.yerson.co/swarm/agent/agent.py -o agent.py && python agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
+      cmd: `curl.exe -fsSL ${AGENT_DOWNLOAD_URL} -o agent.py && python agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
     },
     {
       label: "PowerShell — download & install",
-      cmd: `$ErrorActionPreference = 'Stop'; Invoke-WebRequest -Uri 'https://sandbox.yerson.co/swarm/agent/agent.py' -OutFile agent.py; python agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
+      cmd: `$ErrorActionPreference = 'Stop'; Invoke-WebRequest -Uri '${AGENT_DOWNLOAD_URL}' -OutFile agent.py; python agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
     },
   ],
   linux: [
     {
       label: "Bash — download & run",
-      cmd: `curl -fsSL https://sandbox.yerson.co/swarm/agent/agent.py -o agent.py && python3 agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
+      cmd: `curl -fsSL ${AGENT_DOWNLOAD_URL} -o agent.py && python3 agent.py --coordinator ${COORDINATOR_URL} --api-key YOUR_KEY`,
     },
   ],
 };
@@ -197,10 +200,9 @@ function LoginScreen({ onLogin }: { onLogin: (key: string) => void }) {
           </h1>
           <p style={{ color: "var(--muted)", fontSize: 13 }}>
             control plane&nbsp;&nbsp;·&nbsp;&nbsp;
-            <a href="https://github.com/unknowncoder05/swarm-llm-agent"
-              target="_blank" rel="noopener noreferrer"
+            <a href={AGENT_DOWNLOAD_URL}
               style={{ color: "var(--accent)", textDecoration: "none", fontSize: 12, opacity: 0.8 }}>
-              GitHub ↗
+              Python agent ↗
             </a>
           </p>
         </div>
@@ -2238,8 +2240,8 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
       }}>
         <span style={{ opacity: 0.5, fontSize: 10 }}>OpenAI endpoint</span>
         <span style={{ opacity: 0.35 }}>→</span>
-        https://sandbox.yerson.co/swarm/api/v1
-        <span style={{ color: "var(--muted)", opacity: 0.7, marginLeft: 8, fontSize: 11 }}>X-API-Key: consumer-swarm</span>
+        {deployment.openai}
+        <span style={{ color: "var(--muted)", opacity: 0.7, marginLeft: 8, fontSize: 11 }}>Use a consumer API key</span>
       </div>
 
       {/* stat strip */}

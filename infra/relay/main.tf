@@ -34,7 +34,7 @@ variable "agent_key" {
 }
 
 variable "allowed_https_cidrs" {
-  description = "Campus and coordinator public source CIDRs. HTTPS is not globally open."
+  description = "Worker and coordinator public source CIDRs. HTTPS is not globally open."
   type        = set(string)
   validation {
     condition     = length(var.allowed_https_cidrs) > 0 && alltrue([for cidr in var.allowed_https_cidrs : can(cidrnetmask(cidr)) && cidr != "0.0.0.0/0"])
@@ -70,12 +70,23 @@ variable "max_runtime_hours" {
   }
 }
 
-variable "dns_name" {
-  type    = string
-  default = "swarm-relay.yerson.co"
+variable "hosted_zone_name" {
+  description = "Existing public Route 53 hosted zone owned by the operator."
+  type        = string
   validation {
-    condition     = can(regex("^[a-z0-9-]+\\.yerson\\.co$", var.dns_name))
-    error_message = "Use one relay subdomain of the existing yerson.co zone."
+    condition     = can(regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+\\.?$", var.hosted_zone_name))
+    error_message = "Provide a public DNS zone such as example.com."
+  }
+}
+
+variable "dns_name" {
+  description = "One relay subdomain within hosted_zone_name."
+  type        = string
+  validation {
+    condition = (endswith(var.dns_name, ".${trimsuffix(var.hosted_zone_name, ".")}") &&
+      length(split(".", var.dns_name)) == length(split(".", trimsuffix(var.hosted_zone_name, "."))) + 1 &&
+    can(regex("^[a-z0-9-]+$", split(".", var.dns_name)[0])))
+    error_message = "Use one relay subdomain of the configured hosted_zone_name."
   }
 }
 
@@ -100,7 +111,7 @@ data "aws_ssm_parameter" "ubuntu" {
 
 data "aws_route53_zone" "existing" {
   provider     = aws.global
-  name         = "yerson.co."
+  name         = var.hosted_zone_name
   private_zone = false
 }
 

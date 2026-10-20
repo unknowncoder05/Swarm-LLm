@@ -11,16 +11,26 @@ after(() => fs.rmSync(out, { recursive: true, force: true }));
 execFileSync(path.join(root, 'node_modules/.bin/tsc'), [
   '--target', 'ES2020', '--module', 'commonjs', '--jsx', 'react-jsx',
   '--skipLibCheck', '--strict', '--outDir', out,
-  'src/types.ts', 'src/machine-state.ts', 'src/MachineActivity.tsx',
+  'src/types.ts', 'src/machine-state.ts', 'src/MachineActivity.tsx', 'src/deployment.ts',
 ], { cwd: root, stdio: 'pipe' });
 fs.symlinkSync(path.join(root, 'node_modules'), path.join(out, 'node_modules'));
 const state = require(path.join(out, 'machine-state.js'));
 const { MachineModels, ReplicaOverview } = require(path.join(out, 'MachineActivity.js'));
 const React = require('react');
+const { deploymentUrls } = require(path.join(out, 'deployment.js'));
 const { renderToStaticMarkup } = require('react-dom/server');
 const render = (component, props) => renderToStaticMarkup(React.createElement(component, props));
 const machine = { key: 'a', agent_id: 'a', hostname: 'primary', alive: true, model: 'qwen3:14b', runtime: { ollama_ready: true, ollama_models: [] } };
 const cluster = { cluster_id: 'replica-one', model: 'qwen3:30b-a3b', primary_id: 'a', worker_ids: ['b'], status: 'forming', primary_ready: false, transport: 'quic', ctx_size: 32768 };
+
+test('join and API URLs follow the current deployment origin and port', () => {
+  for (const origin of ['https://llm.example.com:8443', 'http://127.0.0.1:8081']) {
+    const urls = deploymentUrls(origin);
+    assert.equal(urls.api, `${origin}/swarm/api`);
+    assert.equal(urls.openai, `${origin}/swarm/api/v1`);
+    assert.equal(urls.agent, `${origin}/swarm/agent/agent.py`);
+  }
+});
 
 test('download percentages require a live download and valid bounded telemetry', () => {
   const m = { ...machine, phase: 'DOWNLOADING', detail: '21.5% 120 MB/s - qwen3:30b-a3b' };

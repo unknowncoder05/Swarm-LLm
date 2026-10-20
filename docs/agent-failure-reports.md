@@ -34,7 +34,7 @@ evidence: a live machine can still show an earlier failure. The full retained
 history remains available even if a machine disappears from the dashboard:
 
 ```http
-GET /swarm/api/agent-reports?hostname=A506-BIBLIO-08&limit=50
+GET /swarm/api/agent-reports?hostname=GPU-NODE-02&limit=50
 X-API-Key: <admin key>
 ```
 

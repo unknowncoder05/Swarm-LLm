@@ -10,4 +10,6 @@ __pycache__/
 .journal/
 mirror/
 agent/
+nginx/local.d/
 infra/relay/.provisioner/
+agents/agent-standalone.cmd

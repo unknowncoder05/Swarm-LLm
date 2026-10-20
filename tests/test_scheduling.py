@@ -339,7 +339,7 @@ class SchedulingTests(SchedulingFixture):
 
 class AgentSchedulingTests(unittest.TestCase):
     def setUp(self):
-        self.a = load("scheduling_agent", ROOT / "agent/agent.py")
+        self.a = load("scheduling_agent", ROOT / "agents/agent.py")
 
     def test_recommended_models_fit_default_hardware_headroom(self):
         expected = {0: "qwen2.5-coder:1.5b", 4: "qwen2.5-coder:1.5b", 8: "qwen3:8b",

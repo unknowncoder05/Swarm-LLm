@@ -11,14 +11,15 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS = ("qwen3:30b-a3b", "qwen3:14b", "qwen3:8b", "devstral-small-2:24b", "devstral:24b",
           "ministral-3:8b", "qwen2.5-coder:0.5b", "qwen2.5-coder:1.5b", "qwen2.5-coder:3b",
           "qwen2.5-coder:7b", "qwen2.5-coder:14b", "deepseek-r1:14b")
+DEFAULT_BASE_URL = "http://127.0.0.1:8081/swarm/api/v1"
+BASE_URL_ENV = "{env:SWARM_BASE_URL}"
 
 
-def load_consumer_key(root=ROOT, environ=None):
-    """Environment overrides client-only credentials, then coordinator .env."""
+def _load_setting(names, root, environ):
     values = os.environ if environ is None else environ
-    key = values.get("SWARM_CONSUMER_KEY") or values.get("CONSUMER_KEY")
-    if key:
-        return key
+    for name in names:
+        if values.get(name):
+            return values[name]
     for path in (root / ".env.opencode", root / ".env"):
         entries = {}
         if not path.is_file():
@@ -26,7 +27,7 @@ def load_consumer_key(root=ROOT, environ=None):
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             if "=" in line and not line.lstrip().startswith("#"):
                 name, value = line.split("=", 1)
-                if name.strip() not in ("SWARM_CONSUMER_KEY", "CONSUMER_KEY"):
+                if name.strip() not in names:
                     continue
                 value = value.strip()
                 if value.startswith('"') and value.endswith('"'):
@@ -34,10 +35,29 @@ def load_consumer_key(root=ROOT, environ=None):
                 else:
                     value = value.strip("'")
                 entries[name.strip()] = value
-        key = entries.get("SWARM_CONSUMER_KEY") or entries.get("CONSUMER_KEY")
-        if key:
-            return key
+        for name in names:
+            if entries.get(name):
+                return entries[name]
     return ""
+
+
+def load_consumer_key(root=ROOT, environ=None):
+    """Environment overrides client-only credentials, then coordinator .env."""
+    return _load_setting(("SWARM_CONSUMER_KEY", "CONSUMER_KEY"), root, environ)
+
+
+def load_base_url(root=ROOT, environ=None, default=DEFAULT_BASE_URL):
+    return _load_setting(("SWARM_BASE_URL",), root, environ) or default
+
+
+def save_client_settings(root, base_url, key=None):
+    path = root / ".env.opencode"
+    lines = path.read_text(encoding="utf-8-sig").splitlines() if path.exists() else []
+    settings = {"SWARM_BASE_URL": base_url}
+    if key is not None:
+        settings["SWARM_CONSUMER_KEY"] = key
+    lines = [line for line in lines if line.split("=", 1)[0].strip() not in settings]
+    write_private(path, "\n".join(lines + [name + "=" + json.dumps(value) for name, value in settings.items()]) + "\n")
 
 
 def merge_config(existing, generated):
@@ -91,7 +111,7 @@ def choose_model(advertised, requested=None):
     return next(iter(advertised), "qwen2.5-coder:1.5b")
 
 
-def build_config(model, base_url="https://sandbox.yerson.co/swarm/api/v1", context=32768, advertised=None):
+def build_config(model, base_url=BASE_URL_ENV, context=32768, advertised=None):
     if type(context) is not int or not 512 <= context <= 32768:
         raise ValueError("context must be an integer between 512 and 32768")
     names = MODELS if advertised is None else advertised
@@ -125,7 +145,7 @@ def build_config(model, base_url="https://sandbox.yerson.co/swarm/api/v1", conte
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", help="Pin a model instead of selecting from the advertised catalog")
-    parser.add_argument("--base-url", default="https://sandbox.yerson.co/swarm/api/v1")
+    parser.add_argument("--base-url", default=load_base_url())
     parser.add_argument("--context", type=int, default=32768, choices=range(512, 32769), metavar="512..32768")
     parser.add_argument("--output", type=Path, default=ROOT / "opencode.json")
     args = parser.parse_args()
@@ -140,7 +160,8 @@ def main():
     except Exception:
         pass
     model = choose_model(advertised, args.model)
-    config = build_config(model, args.base_url, args.context)
+    config = build_config(model, BASE_URL_ENV, args.context)
+    save_client_settings(ROOT, args.base_url)
     update_config(args.output, config)
     print(f"{args.output}: swarm-llm/{model} ({'advertised' if model in advertised else 'not currently advertised'})")
     print("Use python3 scripts/run-opencode.py to load the consumer credential privately from .env.")

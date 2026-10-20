@@ -12,7 +12,7 @@ from test_agent_reports import ROOT, load
 
 class InstallationTests(unittest.TestCase):
     def setUp(self):
-        self.agent = load("installation_agent", ROOT / "agent/agent.py")
+        self.agent = load("installation_agent", ROOT / "agents/agent.py")
 
     def startup(self, stack, *extra):
         a = self.agent

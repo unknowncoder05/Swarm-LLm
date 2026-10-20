@@ -6,9 +6,9 @@ import shutil
 import sys
 
 try:
-    from gen_opencode_config import load_consumer_key
+    from gen_opencode_config import load_base_url, load_consumer_key
 except ModuleNotFoundError:
-    from scripts.gen_opencode_config import load_consumer_key
+    from scripts.gen_opencode_config import load_base_url, load_consumer_key
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,6 +32,7 @@ def main():
         raise SystemExit("Run python scripts/setup-opencode.py --install first")
     env = dict(os.environ)
     env["SWARM_CONSUMER_KEY"] = load_consumer_key(ROOT, env)
+    env["SWARM_BASE_URL"] = load_base_url(ROOT, env)
     if not env["SWARM_CONSUMER_KEY"]:
         raise SystemExit("Run python scripts/setup-opencode.py to configure the Swarm consumer key")
     env.setdefault("OPENCODE_CONFIG", str(ROOT / "opencode.json"))

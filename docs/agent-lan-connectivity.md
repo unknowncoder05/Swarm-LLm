@@ -30,8 +30,8 @@ without administrator privileges, firewall changes, GPU work, or coordinator
 restarts. Run this on the coordinator host:
 
 ```sh
-python3 scripts/agent-lan-probe.py --hosts A506-BIBLIO-07 A506-BIBLIO-08
-python3 scripts/agent-lan-probe.py --apply --hosts A506-BIBLIO-07 A506-BIBLIO-08
+python3 scripts/agent-lan-probe.py --hosts GPU-NODE-01 GPU-NODE-02
+python3 scripts/agent-lan-probe.py --apply --hosts GPU-NODE-01 GPU-NODE-02
 ```
 
 The first command previews the two selected agents. The second waits for their
@@ -79,7 +79,7 @@ The provisioning implementation was left untouched by this diagnostic change.
 If TCP fails, test simultaneous UDP traffic from both agents:
 
 ```sh
-python3 scripts/agent-lan-probe.py --apply --transport udp --hosts A506-BIBLIO-07 A506-BIBLIO-08
+python3 scripts/agent-lan-probe.py --apply --transport udp --hosts GPU-NODE-01 GPU-NODE-02
 ```
 
 This uses the same safe-update wait, temporary manifest, selected private IPv4

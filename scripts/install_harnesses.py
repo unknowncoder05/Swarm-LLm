@@ -3,6 +3,7 @@ Install swarm-goose and swarm-aider wrappers into ~/.local/bin/.
 Run once from the swarm-llm repo; after that both commands work from any directory.
 """
 import os, shutil, stat, subprocess, sys, textwrap
+from gen_opencode_config import load_base_url
 
 # ── read .env ─────────────────────────────────────────────────────────────────
 env = {}
@@ -21,7 +22,7 @@ if not key:
     print("ERROR: CONSUMER_KEY missing from .env", file=sys.stderr)
     sys.exit(1)
 
-SWARM_URL = "https://sandbox.yerson.co/swarm/api/v1"
+SWARM_URL = load_base_url()
 
 # ── write ~/.config/swarm-llm/config ─────────────────────────────────────────
 cfg_dir = os.path.expanduser("~/.config/swarm-llm")

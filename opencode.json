@@ -7,7 +7,7 @@
       "npm": "@ai-sdk/openai-compatible",
       "name": "Swarm LLM",
       "options": {
-        "baseURL": "https://sandbox.yerson.co/swarm/api/v1",
+        "baseURL": "{env:SWARM_BASE_URL}",
         "apiKey": "{env:SWARM_CONSUMER_KEY}",
         "timeout": 3700000,
         "headerTimeout": 3700000,

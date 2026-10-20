@@ -216,7 +216,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             request = staticmethod(forward_request)
         agents = []
         for name in ("primary", "worker"):
-            spec = importlib.util.spec_from_file_location("relay_" + name, ROOT / "agent/agent.py")
+            spec = importlib.util.spec_from_file_location("relay_" + name, ROOT / "agents/agent.py")
             agent = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(agent)
             agent._agent_id = name
@@ -270,7 +270,7 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
 
 class RelaySocketTests(unittest.TestCase):
     def test_tcp_bridge_disables_nagle_on_connected_and_accepted_sockets(self):
-        spec = importlib.util.spec_from_file_location("relay_tcp_agent", ROOT / "agent/agent.py")
+        spec = importlib.util.spec_from_file_location("relay_tcp_agent", ROOT / "agents/agent.py")
         agent = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(agent)
         with socket.socket() as listener:

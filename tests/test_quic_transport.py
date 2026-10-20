@@ -35,7 +35,7 @@ class FaultProxy(asyncio.DatagramProtocol):
 
 class QuicTransportTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.q = load("quic_transport_under_test", ROOT / "agent/quic_transport.py")
+        self.q = load("quic_transport_under_test", ROOT / "agents/quic_transport.py")
         self.tunnels = []; self.proxies = []; self.native_connections = 0
         self.native = await asyncio.start_server(self.echo, "127.0.0.1", 0)
 

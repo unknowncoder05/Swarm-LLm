@@ -12,11 +12,11 @@ from test_agent_reports import ROOT, load
 
 class UDPConnectivityTests(unittest.TestCase):
     def setUp(self):
-        self.agent = load("udp_connectivity_agent", ROOT / "agent/agent.py")
+        self.agent = load("udp_connectivity_agent", ROOT / "agents/agent.py")
         self.plan = {"run_id": str(uuid.uuid4()), "token": "a" * 32, "transport": "udp",
                      "created_at": time.time(), "expires_at": time.time() + 10,
-                     "agents": [{"agent_id": "one", "ip": "10.8.16.113"},
-                                {"agent_id": "two", "ip": "10.8.16.112"}]}
+                     "agents": [{"agent_id": "one", "ip": "10.0.0.113"},
+                                {"agent_id": "two", "ip": "10.0.0.112"}]}
 
     def test_transport_validation_preserves_tcp_default_and_rejects_unknown_modes(self):
         self.agent._validate_lan_probe(self.plan, "one")
@@ -25,7 +25,7 @@ class UDPConnectivityTests(unittest.TestCase):
             self.agent._validate_lan_probe(dict(self.plan, transport="shell"), "one")
 
     def test_real_udp_peers_send_and_receive_on_their_advertised_sockets_then_close(self):
-        agents = [self.agent, load("udp_connectivity_peer", ROOT / "agent/agent.py")]
+        agents = [self.agent, load("udp_connectivity_peer", ROOT / "agents/agent.py")]
         captured = {}; results = {}; errors = []; lock = threading.Lock()
         def publish(identity, result):
             with lock:

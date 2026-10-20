@@ -54,6 +54,9 @@ class OpenCodeSetupTests(unittest.TestCase):
         self.assertEqual(config["disabled_providers"], ["blocked"])
         self.assertEqual(config["model"], "swarm-llm/qwen3:30b-a3b")
         self.assertNotIn("test-secret", path.read_text() + self.output.getvalue())
+        self.assertNotIn("https://swarm.example/v1", path.read_text())
+        self.assertEqual(config["provider"]["swarm-llm"]["options"]["baseURL"], "{env:SWARM_BASE_URL}")
+        self.assertEqual(self.config.load_base_url(self.root, {}), "https://swarm.example/v1")
 
     def test_environment_client_file_and_server_file_precedence(self):
         (self.root / ".env").write_text('CONSUMER_KEY="server"\nUNRELATED="C:\\Windows"\n')
