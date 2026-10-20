@@ -1,0 +1,108 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+
+# This timer precedes downloads: failed bootstrap still has a compute limit.
+cat >/etc/systemd/system/swarm-relay-expire.service <<'UNIT'
+[Unit]
+Description=Terminate budget-limited Swarm relay trial
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/shutdown -h now
+UNIT
+cat >/etc/systemd/system/swarm-relay-expire.timer <<'UNIT'
+[Unit]
+Description=Swarm relay trial runtime limit
+[Timer]
+OnBootSec=${runtime_seconds}s
+Unit=swarm-relay-expire.service
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now swarm-relay-expire.timer
+
+umask 022
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q
+apt-get install -y -q python3-venv caddy ca-certificates curl
+mkdir -p /opt/swarm-relay /etc/swarm-relay
+printf '%s' '${relay_server}' | base64 -d | gzip -d >/opt/swarm-relay/relay_server.py
+printf '%s' '${relay_transport}' | base64 -d | gzip -d >/opt/swarm-relay/relay_transport.py
+printf '%s' '${requirements}' | base64 -d >/opt/swarm-relay/requirements.txt
+python3 -m venv /opt/swarm-relay/venv
+/opt/swarm-relay/venv/bin/pip install --disable-pip-version-check -r /opt/swarm-relay/requirements.txt boto3==1.40.52
+
+/opt/swarm-relay/venv/bin/python - <<'PY'
+import boto3, os, time
+client=boto3.client('ssm',region_name='eu-south-2')
+for attempt in range(30):
+    try:
+        value=client.get_parameter(Name='${keys_parameter}',WithDecryption=True)['Parameter']['Value']
+        fd=os.open('/etc/swarm-relay/keys.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        with os.fdopen(fd,'w') as stream:
+            stream.write(value)
+        os.chmod('/etc/swarm-relay/keys.json',0o640)
+        break
+    except Exception:
+        if attempt == 29:
+            raise RuntimeError('Could not retrieve relay credentials from SSM') from None
+        time.sleep(5)
+PY
+
+useradd --system --home /nonexistent --shell /usr/sbin/nologin swarm-relay
+chown -R root:swarm-relay /etc/swarm-relay
+chmod 750 /etc/swarm-relay
+chmod 755 /opt/swarm-relay
+chmod 644 /opt/swarm-relay/*.py
+
+cat >/etc/systemd/system/swarm-relay.service <<'UNIT'
+[Unit]
+Description=Swarm regional RPC byte relay
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=swarm-relay
+Group=swarm-relay
+WorkingDirectory=/opt/swarm-relay
+Environment=RELAY_KEYS_FILE=/etc/swarm-relay/keys.json
+ExecStart=/opt/swarm-relay/venv/bin/uvicorn relay_server:app --host 127.0.0.1 --port 8080 --workers 1 --no-access-log
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Public HTTP serves only ACME validation/HTTPS redirects. Application traffic
+# is authenticated and security-group restricted on HTTPS.
+cat >/etc/caddy/Caddyfile <<'CADDY'
+${hostname} {
+    tls {
+        issuer acme {
+            disable_tlsalpn_challenge
+        }
+    }
+    request_body {
+        max_size 1MB
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}
+CADDY
+chmod 644 /etc/caddy/Caddyfile
+systemctl daemon-reload
+systemctl enable --now swarm-relay
+systemctl reload caddy
+
+# SSM is outbound-only; no SSH port or key pair is provisioned.
+if ! systemctl is-active --quiet amazon-ssm-agent && ! systemctl is-active --quiet snap.amazon-ssm-agent.amazon-ssm-agent; then
+  curl -fL --retry 5 https://s3.eu-south-2.amazonaws.com/amazon-ssm-eu-south-2/latest/debian_arm64/amazon-ssm-agent.deb -o /tmp/swarm-ssm-agent.deb
+  dpkg -i /tmp/swarm-ssm-agent.deb
+  systemctl enable --now amazon-ssm-agent
+fi

@@ -1,0 +1,72 @@
+services:
+
+  # ── coordinator (FastAPI) ──────────────────────────────────────────────────
+  coordinator:
+    build:
+      context: ./coordinator
+    restart: unless-stopped
+    environment:
+      ADMIN_KEY:    ${ADMIN_KEY}
+      AGENT_KEY:    ${AGENT_KEY}
+      CONSUMER_KEY: ${CONSUMER_KEY}
+      DB_PATH:      /data/coordinator.db
+      AGENT_SOURCE_PATH: /opt/swarm/agent.py
+      RPC_RELAY_URL: ${RPC_RELAY_URL:-}
+      RPC_RELAY_ADMIN_KEY: ${RPC_RELAY_ADMIN_KEY:-}
+      RPC_RELAY_EXPIRES_AT: ${RPC_RELAY_EXPIRES_AT:-0}
+      RPC_RELAY_PROVISIONER_URL: ${RPC_RELAY_PROVISIONER_URL:-}
+      RPC_RELAY_PROVISIONER_KEY: ${RPC_RELAY_PROVISIONER_KEY:-}
+      RPC_CLOUD_RELAY_ENABLED: ${RPC_CLOUD_RELAY_ENABLED:-false}
+      RPC_RELAYS: ${RPC_RELAYS:-[]}
+      RPC_DEFAULT_TRANSPORT: ${RPC_DEFAULT_TRANSPORT:-}
+      RPC_MODEL_RUNTIME_PROFILES: ${RPC_MODEL_RUNTIME_PROFILES:-}
+      RPC_IDLE_TIMEOUT_SEC: ${RPC_IDLE_TIMEOUT_SEC:-300}
+    volumes:
+      - coordinator-data:/data
+      - ./agent:/opt/swarm:ro
+    expose:
+      - "8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - swarm
+
+  # ── gateway: dashboard and API under /swarm on localhost:8081 ────────────
+  # TLS terminated upstream by sandbox.yerson.co's reverse proxy.
+  # sandbox.yerson.co/swarm/* → :8081/swarm/*
+  gateway:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./nginx/gateway.conf:/etc/nginx/conf.d/gateway.conf:ro
+      - ./mirror:/srv/ollama:ro
+      - ./agent:/srv/agent:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - coordinator
+      - ui
+    networks:
+      - swarm
+
+  # ── React dashboard ───────────────────────────────────────────────────────
+  # Internal only; API requests retain the key supplied by the user.
+  ui:
+    build:
+      context: ./ui
+    restart: unless-stopped
+    expose:
+      - "8082"
+    depends_on:
+      - coordinator
+    networks:
+      - swarm
+
+networks:
+  swarm:
+    driver: bridge
+
+volumes:
+  coordinator-data:

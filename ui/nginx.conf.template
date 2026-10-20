@@ -1,0 +1,25 @@
+server {
+    listen 8082;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy /api/* → coordinator, injecting the admin key server-side.
+    # The key never reaches the browser — it lives only in the nginx process.
+    location /api/ {
+        rewrite ^/api/(.*) /$1 break;
+        proxy_pass         http://coordinator:8080;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-API-Key "${ADMIN_KEY}";
+        proxy_read_timeout 180s;
+        proxy_buffering    off;
+        proxy_cache        off;
+    }
+}

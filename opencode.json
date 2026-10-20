@@ -1,0 +1,147 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "swarm-llm/qwen3:30b-a3b",
+  "small_model": "swarm-llm/qwen3:30b-a3b",
+  "provider": {
+    "swarm-llm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Swarm LLM",
+      "options": {
+        "baseURL": "https://sandbox.yerson.co/swarm/api/v1",
+        "apiKey": "{env:SWARM_CONSUMER_KEY}",
+        "timeout": 3700000,
+        "headerTimeout": 3700000,
+        "chunkTimeout": 3700000
+      },
+      "models": {
+        "qwen3:30b-a3b": {
+          "name": "qwen3:30b-a3b",
+          "tool_call": true,
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          },
+          "options": {
+            "options": {
+              "num_ctx": 32768
+            }
+          }
+        },
+        "qwen3:14b": {
+          "name": "qwen3:14b",
+          "tool_call": true,
+          "limit": {
+            "context": 4096,
+            "output": 2048
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        },
+        "qwen3:8b": {
+          "name": "qwen3:8b",
+          "tool_call": true,
+          "limit": {
+            "context": 2048,
+            "output": 1024
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        },
+        "devstral-small-2:24b": {
+          "name": "devstral-small-2:24b"
+        },
+        "devstral:24b": {
+          "name": "devstral:24b"
+        },
+        "ministral-3:8b": {
+          "name": "ministral-3:8b"
+        },
+        "qwen2.5-coder:0.5b": {
+          "name": "qwen2.5-coder:0.5b"
+        },
+        "qwen2.5-coder:1.5b": {
+          "name": "qwen2.5-coder:1.5b"
+        },
+        "qwen2.5-coder:3b": {
+          "name": "qwen2.5-coder:3b"
+        },
+        "qwen2.5-coder:7b": {
+          "name": "qwen2.5-coder:7b"
+        },
+        "qwen2.5-coder:14b": {
+          "name": "qwen2.5-coder:14b"
+        },
+        "deepseek-r1:14b": {
+          "name": "deepseek-r1:14b"
+        },
+        "qwen3.6:27b": {
+          "name": "qwen3.6:27b",
+          "tool_call": true,
+          "limit": {
+            "context": 4096,
+            "output": 2048
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        },
+        "qwen3:32b": {
+          "name": "qwen3:32b",
+          "tool_call": true,
+          "limit": {
+            "context": 4096,
+            "output": 2048
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        },
+        "qwen3:30b": {
+          "name": "qwen3:30b",
+          "tool_call": true,
+          "limit": {
+            "context": 4096,
+            "output": 2048
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        },
+        "gemma4:12b": {
+          "name": "gemma4:12b",
+          "tool_call": true,
+          "limit": {
+            "context": 2048,
+            "output": 1024
+          },
+          "reasoning": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          }
+        }
+      },
+      "whitelist": [
+        "qwen3:14b",
+        "qwen3:30b-a3b",
+        "qwen3:8b",
+        "gemma4:12b"
+      ]
+    }
+  },
+  "agent": {
+    "title": {
+      "model": "swarm-llm/qwen3:14b"
+    }
+  }
+}

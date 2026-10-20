@@ -1,0 +1,13 @@
+.env
+.env.opencode
+.env.opencode.*
+.opencode-tools/
+ui/node_modules/
+ui/dist/
+__pycache__/
+*.pyc
+.rpc-trial/
+.journal/
+mirror/
+agent/
+infra/relay/.provisioner/

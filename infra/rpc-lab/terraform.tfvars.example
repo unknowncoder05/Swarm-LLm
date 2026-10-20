@@ -1,0 +1,12 @@
+# Smaller real GPUs: 4 vCPUs total; requires the regional G On-Demand quota.
+trial_size        = "small"
+region            = "us-east-1"
+availability_zone = "us-east-1a"
+node_count        = 2
+spot_max_price    = 0.30
+max_runtime_hours = 2
+
+# A short real-capacity test, with approximate 1 Gbps LAN networking.
+context_size      = 1024
+peer_network_mbps = 1000
+peer_latency_ms   = 1

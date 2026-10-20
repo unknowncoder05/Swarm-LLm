@@ -1,0 +1,10 @@
+# Original large-model trial: requires at least 8 G Spot vCPUs.
+trial_size        = "large"
+region            = "us-east-1"
+availability_zone = "us-east-1f"
+node_count        = 2
+spot_max_price    = 0.30
+max_runtime_hours = 2
+context_size      = 8192
+peer_network_mbps = 1000
+peer_latency_ms   = 1
