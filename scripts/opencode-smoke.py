@@ -38,6 +38,7 @@ PROMPT = ("Fix normalize_labels in labels.py. It must trim whitespace, drop empt
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="qwen3:30b-a3b")
+    parser.add_argument("--title-model", help="Override the checkout's title model for this isolated trial")
     parser.add_argument("--context", type=int, default=32768, choices=range(512, 32769), metavar="512..32768")
     parser.add_argument("--timeout", type=int, default=1800)
     args = parser.parse_args()
@@ -66,6 +67,12 @@ def main():
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     config = generator.build_config(args.model, context=args.context)
+    # Apply the requested fixture window to the model under test as well as the
+    # generator's legacy 30B profile; otherwise small static profiles compact
+    # before this coding task can exercise editing and test execution.
+    profile = config["provider"]["swarm-llm"]["models"][args.model]
+    profile["limit"] = {"context": args.context, "output": min(4096, args.context // 8)}
+    profile.setdefault("options", {}).setdefault("options", {})["num_ctx"] = args.context
     config.update({
         "enabled_providers": ["swarm-llm"], "autoupdate": False, "share": "disabled", "snapshot": False,
         "tools": {"task": False, "webfetch": False, "websearch": False, "skill": False,
@@ -80,6 +87,8 @@ def main():
         title_model = json.loads(profile_path.read_text()).get("agent", {}).get("title", {}).get("model")
         if title_model and title_model.startswith("swarm-llm/"):
             config["agent"]["title"] = {"model": title_model}
+    if args.title_model:
+        config["agent"]["title"] = {"model": "swarm-llm/" + args.title_model}
     config_path = trial / "opencode.json"
     config_path.write_text(json.dumps(config, indent=2))
     child_env = dict(os.environ, SWARM_CONSUMER_KEY=values["CONSUMER_KEY"], OPENCODE_CONFIG=str(config_path),

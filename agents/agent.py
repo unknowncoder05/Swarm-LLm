@@ -800,14 +800,28 @@ _NATIVE_MODEL_ARTIFACTS = {
     },
 }
 
+_NATIVE_CHAT_TEMPLATES = {
+    "devstral-small-2:24b": {
+        "repository": "mistralai/Devstral-Small-2-24B-Instruct-2512",
+        "revision": "55c5b41e98c2dbd21b0c8afffc540dcfc9eb5128",
+        "filename": "chat_template.jinja",
+        "size": 11362,
+        "sha256": "a0c0ed8a45c2c75c85fd756316a10419b90eb4f3dbe64d00f5c0b8ad4de5209a",
+    },
+}
+
 
 def resolve_native_gguf(model):
     artifact = _NATIVE_MODEL_ARTIFACTS.get(model)
     if not artifact:
         return resolve_gguf(model)
+    return _cached_native_artifact(artifact, model)
+
+
+def _cached_native_artifact(artifact, model):
     cache = _context_paths()["root"] / "models"
     cache.mkdir(parents=True, exist_ok=True)
-    target = cache / (artifact["sha256"] + ".gguf")
+    target = cache / (artifact["sha256"] + Path(artifact["filename"]).suffix)
     if target.exists() and target.stat().st_size == artifact["size"]:
         return str(target)  # Only a completely verified download is promoted here.
     partial = target.with_suffix(".partial")
@@ -816,7 +830,7 @@ def resolve_native_gguf(model):
         raise RuntimeError("Not enough disk space for the native model: " + model)
     url = "https://huggingface.co/{repository}/resolve/{revision}/{filename}".format(**artifact)
     digest, downloaded, last_report = hashlib.sha256(), 0, 0.0
-    write_status("RPC_PREPARING", "downloading native Q4_K_M model " + model)
+    write_status("RPC_PREPARING", "downloading native artifact " + model)
     try:
         with requests.get(url, stream=True, timeout=(15, 120)) as response, partial.open("wb") as output:
             response.raise_for_status()
@@ -1799,6 +1813,10 @@ def run_rpc_primary(assignment, coordinator, api_key):
         "--fit", "on", "--fit-target", "512", "--jinja", "-lv", "4",
     ]
     cmd += runtime_args
+    if model in _NATIVE_CHAT_TEMPLATES:
+        # The embedded template rejects adjacent user messages sent by coding
+        # clients. The author's updated template preserves their tool format.
+        cmd += ["--chat-template-file", _cached_native_artifact(_NATIVE_CHAT_TEMPLATES[model], model)]
     if workers:
         cmd += ["--rpc", ",".join(workers)]
         step(f"Waiting for {len(workers)} worker RPC server(s) to come up...")

@@ -99,6 +99,9 @@ disk-space and size bounds, and promotes it only after hash verification. It doe
 not pass Ollama's combined text/vision blob to the upstream native text loader.
 Other native models retain Ollama-blob reuse; single-device Devstral still uses
 the original Ollama library package.
+The model author's updated chat template is independently pinned and verified;
+it accepts consecutive user messages from OpenCode while retaining Devstral's
+native tool format. The older GGUF's embedded alternation check rejected them.
 
 Recovering requests can join a matching forming replica after old role owners
 acknowledge teardown, rather than wait for readiness or try to reserve another

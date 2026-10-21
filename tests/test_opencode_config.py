@@ -1,5 +1,6 @@
 """Keep the coding client on the requested model and a usable context budget."""
 import unittest
+import json
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -37,6 +38,18 @@ class OpenCodeConfigTests(unittest.TestCase):
         for context in (True, 511, 32769, 32768.0):
             with self.subTest(context=context), self.assertRaises(ValueError):
                 self.config.build_config("qwen3:30b-a3b", context=context)
+
+    def test_saved_qwen_default_and_selectable_models_send_their_advertised_context(self):
+        saved = json.loads((ROOT / "opencode.json").read_text())
+        self.assertEqual(saved["model"], "swarm-llm/qwen3:14b")
+        self.assertEqual(saved["small_model"], saved["model"])
+        self.assertEqual(saved["agent"]["title"]["model"], saved["model"])
+        provider = saved["provider"]["swarm-llm"]
+        for name in ("qwen3:14b", "qwen3:8b", "devstral-small-2:24b"):
+            profile = provider["models"][name]
+            self.assertIn(name, provider["whitelist"])
+            self.assertEqual(profile["options"]["options"]["num_ctx"], profile["limit"]["context"])
+            self.assertGreaterEqual(profile["limit"]["context"] - profile["limit"]["output"], 7168)
 
     def test_launcher_corrects_stale_pwd_and_forwards_the_requested_directory(self):
         launcher = load("opencode_launcher", ROOT / "scripts/run-opencode.py")

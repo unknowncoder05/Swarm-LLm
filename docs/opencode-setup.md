@@ -64,12 +64,20 @@ python3 scripts/run-opencode.py
 
 | Model | Placement on this pair | Saved OpenCode context |
 | --- | --- | --- |
-| `qwen3:14b` | One GPU; default for chat, background work and titles | 4,096 |
-| `qwen3:8b` | One GPU; selectable for lighter work | 2,048 |
-| `devstral-small-2:24b` | Both GPUs using native llama.cpp RPC | 2,048 |
+| `qwen3:14b` | One GPU; default for chat, background work and titles | 8,192 |
+| `qwen3:8b` | One GPU; selectable for lighter work | 8,192 |
+| `devstral-small-2:24b` | Both GPUs using native llama.cpp RPC | 16,384 |
 
-These are conservative client profiles, not architectural limits. A Devstral
-request without a context override starts a 4,096-token distributed runtime.
+These saved profiles target this pair and send matching `options.num_ctx` values;
+they are not architectural limits. Setup preserves saved per-model overrides.
+The generator's portable defaults remain smaller for deployments with less VRAM.
+A Devstral API request without a context override starts a 4,096-token runtime.
+Small client windows can cause OpenCode to compact repeatedly before editing;
+the saved windows leave more room for its instructions and tool definitions.
+The 8K Qwen profiles reserve 1,024 output tokens, leaving about 7K for input.
+Reserving half the window for output caused repeated compaction on the coding
+fixture. Devstral's 16K profile reserves 4K for output. This follows the pinned
+[OpenCode compaction budget calculation](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/session/overflow.ts).
 Single-machine Qwen requests default to Ollama's top-level `think: false`, so
 short output budgets reach an answer. API callers can explicitly request
 `think: true`; returned Ollama thinking is exposed as `reasoning_content`.
@@ -90,6 +98,9 @@ for the single-GPU Ollama path. The distributed route supports text and tools;
 it does not load an image projector. See
 [Ollama's artifact compatibility layer](https://github.com/ollama/ollama/blob/main/llama/compat/README.md)
 for the upstream packaging distinction.
+The agent also pins and verifies the model author's updated chat template. The
+older embedded template rejects adjacent user messages used by coding clients;
+the updated template retains the model's native tool format and accepts them.
 
 Devstral prefers Ollama when a single eligible GPU can hold it with the requested
 context. Otherwise the coordinator forms a native cluster, checking the route
@@ -235,6 +246,19 @@ The catalog check verifies authentication and model discovery, not generation.
 To exercise actual file reading, editing and test execution in a disposable
 workspace, run `python3 scripts/opencode-smoke.py` against the default endpoint.
 The smoke runner retains private results under `.rpc-trial/`.
+Its `--context` applies to the model being tested. For this checkout's default:
+
+```sh
+python3 scripts/opencode-smoke.py --model qwen3:14b --context 8192
+```
+
+To check Devstral on the same pair, keep the trial's titles on Devstral too:
+
+```sh
+python3 scripts/opencode-smoke.py --model devstral-small-2:24b --context 16384 --title-model devstral-small-2:24b
+```
+
+This override affects only the disposable trial, leaving the saved default intact.
 
 ## Transport
 

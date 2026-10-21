@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from contextlib import ExitStack
 from unittest.mock import Mock, patch
 
 from test_agent_reports import ROOT, load
@@ -61,3 +62,18 @@ class NativeArtifactTests(unittest.TestCase):
         with patch.object(self.agent, "resolve_gguf", return_value="cached.gguf") as resolve:
             self.assertEqual(self.agent.resolve_native_gguf("qwen3:30b-a3b"), "cached.gguf")
             resolve.assert_called_once_with("qwen3:30b-a3b")
+
+    def test_devstral_primary_uses_verified_author_template_for_coding_clients(self):
+        a = self.agent
+        with ExitStack() as stack:
+            for name, value in {"resolve_native_gguf": "model.gguf", "ensure_llamacpp": {"llama_server": "server"},
+                    "_stop_ollama_for_rpc": None, "_available_loopback_port": 18080,
+                    "_wait_llama_ready": True, "_read_rpc_offload_info": (41, 41),
+                    "_confirm_rpc_ready": False}.items():
+                stack.enter_context(patch.object(a, name, return_value=value))
+            cached = stack.enter_context(patch.object(a, "_cached_native_artifact", return_value="verified.jinja"))
+            launch = stack.enter_context(patch.object(a, "_launch_rpc_process"))
+            a.run_rpc_primary({"cluster_id": "trial", "model": self.model, "ctx_size": 16384}, "http://test", "key")
+            command = launch.call_args.args[0]
+            self.assertEqual(command[command.index("--chat-template-file") + 1], "verified.jinja")
+            cached.assert_called_once_with(a._NATIVE_CHAT_TEMPLATES[self.model], self.model)
