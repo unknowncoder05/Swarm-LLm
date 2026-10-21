@@ -19,6 +19,24 @@ const waiting = () => new Response(JSON.stringify({ detail: 'Waiting for GPU cap
 });
 const answer = { choices: [{ message: { content: 'Hello' } }] };
 
+test('route cooldown waits for connectivity without accepting duplicate inference', async t => {
+  const phases = []; const bodies = [];
+  t.mock.method(global, 'fetch', async (url, options) => {
+    bodies.push(options.body);
+    return bodies.length === 1
+      ? Response.json({ detail: 'GPU capacity is available; routes are cooling down' }, {
+          status: 503, headers: { 'X-Swarm-Status': 'waiting_for_route', 'Retry-After': '0' },
+        })
+      : Response.json(answer);
+  });
+  assert.deepEqual(await requestChatCompletion('consumer', payload, {
+    signal: new AbortController().signal, onPhase: phase => phases.push(phase),
+  }), answer);
+  assert.ok(phases.includes('waiting_for_route'));
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1]);
+});
+
 test('restart capacity rejections wait and retain one unchanged prompt until setup succeeds', async t => {
   const bodies = []; const phases = [];
   t.mock.method(global, 'fetch', async (url, options) => {

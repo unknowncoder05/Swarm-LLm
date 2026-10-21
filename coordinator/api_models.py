@@ -103,6 +103,7 @@ class JobResultPayload(BaseModel):
     error: Optional[str] = None
     elapsed_ms: Optional[float] = None
     claim_token: Optional[str] = None
+    upstream_status: Optional[int] = Field(default=None, ge=400, le=599, strict=True)
 
 
 class ImageGenerationRequest(BaseModel):

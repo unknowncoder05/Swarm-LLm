@@ -510,7 +510,12 @@ async def _create_automatic_rpc_cluster(model, required_vram, ctx_size, agent_id
         return None
     ids = [m.agent_id for m in selected]
     quic = all((m.runtime or {}).get("rpc_quic") and private_ipv4(m.lan_ip) for m in selected)
-    for route in relay_policy.candidates(ids, quic=quic, managed=bool(relay_provisioner)):
+    routes = relay_policy.candidates(ids, quic=quic, managed=bool(relay_provisioner))
+    if not routes:
+        raise HTTPException(503, "GPU capacity is available, but compatible routes are cooling down after earlier failures. "
+                            "Waiting for a working connection between the machines.",
+                            headers={"X-Swarm-Status": "waiting_for_route", "Retry-After": "5"})
+    for route in routes:
         regional = {"url": route.url, "control_key": route.control_key, "expires_at": 0} if route.url else None
         if route.identity == "managed-relay":
             try:
@@ -616,7 +621,7 @@ def _dissolve_cluster(cluster: RpcCluster, reason: str = "idle") -> None:
     cluster.dissolve_reason = reason
     recover = cluster.automatic and reason in {"preflight_failed", "relay_offline", "worker_aborted",
         "primary_aborted", "member_offline", "form_timeout", "inference_failed", "provisioner_unreachable"}
-    if recover:
+    if recover and reason in {"preflight_failed", "relay_offline", "worker_aborted", "member_offline", "provisioner_unreachable"}:
         relay_policy.reject(cluster.route_id, [cluster.primary_id, *cluster.worker_ids])
     for job in list(jobs.values()):
         belongs = job.rpc_cluster_id == cluster.cluster_id
@@ -1522,7 +1527,8 @@ async def submit_job_result(
 
     if getattr(job, "rpc_recovering", False):
         raise HTTPException(409, "Result belongs to a recovering RPC session")
-    if payload.error and job.rpc_cluster_id:
+    if payload.error and job.rpc_cluster_id and (payload.upstream_status is None or
+                                               payload.upstream_status in (429, 502, 503, 504)):
         cluster = rpc_clusters.get(job.rpc_cluster_id)
         if cluster and cluster.automatic and cluster.status in ("forming", "active"):
             _dissolve_cluster(cluster, "inference_failed")
@@ -1578,6 +1584,7 @@ async def submit_job_result(
 
     job.result     = result
     job.error      = payload.error
+    job.upstream_status = payload.upstream_status
     job.elapsed_ms = payload.elapsed_ms
     job.done_event.set()
     _remember_terminal_claim(job_id, job.claim_token)
@@ -1690,7 +1697,8 @@ def _finalize_chat_response(job, user_id, t_start):
             tc   = m.get("tool_calls")
             args_type = type((((tc or [{}])[0] or {}).get("function") or {}).get("arguments")).__name__ if tc else "-"
             print(f"[job {job.id[:8]}] DEBUG msg[{i}] role={role} keys={list(m.keys())} args_type={args_type}")
-        raise HTTPException(502, f"Upstream error: {job.error[:300]}")
+        status = job.upstream_status if job.upstream_status in (400, 413, 422) else 502
+        raise HTTPException(status, f"Upstream error: {job.error[:300]}")
 
     elapsed = (time.time() - t_start) * 1000
     result_raw       = job.result or {}

@@ -1392,6 +1392,22 @@ def _read_rpc_stream(response, emit):
     return result
 
 
+class NativeRequestError(RuntimeError):
+    def __init__(self, status_code, detail):
+        super().__init__(f"Native inference HTTP {status_code}: {detail}")
+        self.status_code = status_code
+
+
+def _check_native_response(response):
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = _redact_report(response.text)
+        if len(detail) > 4096:
+            detail = detail[:2048] + "\n...\n" + detail[-2048:]
+        raise NativeRequestError(response.status_code, detail) from exc
+
+
 def rpc_infer(job_body, llama_port, emit=None):
     opts = job_body.get("options", {})
     # The coordinator converts tool_call arguments string→dict for Ollama native format.
@@ -1431,14 +1447,14 @@ def rpc_infer(job_body, llama_port, emit=None):
         openai_body["stream_options"] = {"include_usage": True}
         with requests.post(f"http://127.0.0.1:{llama_port}/v1/chat/completions",
                 json=openai_body, stream=True, timeout=1800) as response:
-            response.raise_for_status()
+            _check_native_response(response)
             return _read_rpc_stream(response, emit)
     r = requests.post(
         f"http://127.0.0.1:{llama_port}/v1/chat/completions",
         json=openai_body,
         timeout=1800,
     )
-    r.raise_for_status()
+    _check_native_response(r)
     return r.json()
 
 def _unload_ollama_models():
@@ -1889,9 +1905,15 @@ def run_rpc_primary(assignment, coordinator, api_key):
                 ok(f"RPC job {job_id} done in {ms/1000:.1f}s")
             except Exception as e:
                 err(f"RPC job {job_id} failed: {e}")
+                status = getattr(e, "status_code", None)
+                if status is not None:
+                    e.model = model
+                    _log_crash(e)
+                    write_status("RPC_PRIMARY", f"native request returned HTTP {status}")
                 try:
                     _post_chat_result(coordinator, api_key, job_id,
-                        payload={"error": str(e), "claim_token": claim_token})
+                        payload={"error": str(e), "claim_token": claim_token,
+                                 **({"upstream_status": status} if status is not None else {})})
                 except Exception:
                     pass
                 if isinstance(e, RpcStreamCancelled):

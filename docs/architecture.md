@@ -108,6 +108,14 @@ acknowledge teardown, rather than wait for readiness or try to reserve another
 pair. Ready replicas remain preferred. Relay recovery retains the longer request
 budget, measured from the original enqueue time; retries never reset that clock.
 
+Native HTTP request errors retain their status and bounded diagnostic detail.
+Context/schema/template rejections complete only that request and keep the healthy
+runtime available. They do not trigger model reloads or penalize network routes.
+Transport failures remain recoverable; route cooldowns require evidence of a
+route or peer failure. If GPUs fit but every route is in cooldown, admission
+returns `waiting_for_route`; the dashboard retains the prompt and waits for a
+working connection. This rejection accepts no inference job.
+
 Claims carry attempt tokens. Late results, old teardown acknowledgments and lost
 claim-response retries cannot overwrite a newer attempt or free its reservation.
 Cancellation fences the logical job immediately, while the physical reservation

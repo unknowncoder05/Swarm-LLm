@@ -63,6 +63,19 @@ class NativeArtifactTests(unittest.TestCase):
             self.assertEqual(self.agent.resolve_native_gguf("qwen3:30b-a3b"), "cached.gguf")
             resolve.assert_called_once_with("qwen3:30b-a3b")
 
+    def test_native_http_errors_preserve_status_and_context_detail_in_both_response_modes(self):
+        a = self.agent
+        for emit in (None, Mock()):
+            response = Mock(status_code=400, text='{"error":"request (11845 tokens) exceeds context (4096 tokens)"}')
+            response.raise_for_status.side_effect = a.requests.HTTPError("bad request")
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            with patch.object(a.requests, "post", return_value=response):
+                with self.assertRaises(a.NativeRequestError) as error:
+                    a.rpc_infer({"model": self.model, "messages": [], "options": {}}, 18080, emit)
+                self.assertEqual(error.exception.status_code, 400)
+                self.assertIn("11845", str(error.exception))
+
     def test_devstral_primary_uses_verified_author_template_for_coding_clients(self):
         a = self.agent
         with ExitStack() as stack:

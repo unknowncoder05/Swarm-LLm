@@ -45,7 +45,7 @@ class HybridModelTests(SchedulingFixture):
         cluster = self.c.rpc_clusters[job.rpc_cluster_id]
         self.assertEqual({cluster.primary_id, *cluster.worker_ids}, {"primary", "worker"})
         self.assertEqual(job.body["options"]["temperature"], .15)
-        self.assertEqual(job.body["options"]["num_ctx"], 4096)
+        self.assertEqual(job.body["options"]["num_ctx"], 16384)
 
     async def test_large_single_gpu_keeps_ordinary_ollama_path(self):
         self.machine("large", 24)
@@ -126,6 +126,68 @@ class HybridModelTests(SchedulingFixture):
         self.assertEqual(response.headers["X-Swarm-Status"], "waiting_for_capacity")
         self.assertFalse(self.c.jobs)
         self.assertFalse(self.c.rpc_clusters)
+
+    async def test_route_cooldown_reports_routes_instead_of_insufficient_vram(self):
+        self.c.relay_policy = self.c.RelayPolicy()
+        for name in ("primary", "worker"):
+            self.machine(name).runtime = {"rpc_preflight": True, "rpc_quic": True, "rpc_relay_external": True}
+        for route in ("lan-quic", "coordinator"):
+            self.c.relay_policy.reject(route, ["primary", "worker"])
+        response = await self.post(rpc_transport="auto")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["X-Swarm-Status"], "waiting_for_route")
+        self.assertIn("GPU capacity is available", response.json()["detail"])
+        self.assertFalse(self.c.jobs)
+        self.assertFalse(self.c.rpc_clusters)
+        self.assertFalse(any(m.in_rpc for m in self.c.machines.values()))
+
+    async def test_native_context_error_reaches_client_without_restarting_or_banning_pair(self):
+        cluster = self.pair()
+        cluster.ctx_size, cluster.automatic, cluster.route_id = 16384, True, "lan-quic"
+        task = asyncio.create_task(self.post())
+        try:
+            for _ in range(100):
+                if self.c.jobs or task.done(): break
+                await asyncio.sleep(.005)
+            job = next(iter(self.c.jobs.values()))
+            claim = await self.claim(cluster.primary_id, MODEL)
+            result = await self.client.post(f"/agent/jobs/{job.id}/result", headers=self.headers,
+                json={"claim_token": claim.json()["claim_token"], "error": "request exceeds the available context size",
+                      "upstream_status": 400})
+            self.assertEqual(result.status_code, 200)
+            response = await task
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("context size", response.json()["detail"])
+            self.assertEqual(cluster.status, "active")
+            self.assertFalse(self.c.machines[cluster.primary_id].busy)
+            self.assertFalse(self.c.relay_policy.failed)
+            good = self.enqueue(MODEL, 16384); good.rpc_cluster_id = cluster.cluster_id
+            self.assertEqual((await self.claim(cluster.primary_id, MODEL)).json()["id"], good.id)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_native_template_error_is_terminal_but_transport_errors_remain_recoverable(self):
+        cluster = self.pair()
+        cluster.automatic, cluster.route_id = True, "lan-quic"
+        for status in (500, 503):
+            job = self.enqueue(MODEL); job.rpc_cluster_id = cluster.cluster_id
+            claim = await self.claim(cluster.primary_id, MODEL)
+            response = await self.client.post(f"/agent/jobs/{job.id}/result", headers=self.headers,
+                json={"claim_token": claim.json()["claim_token"], "error": "native error", "upstream_status": status})
+            self.assertEqual(response.status_code, 200)
+            if status == 500:
+                self.assertTrue(job.done_event.is_set())
+                self.assertEqual(cluster.status, "active")
+            else:
+                self.assertTrue(job.rpc_recovering)
+                self.assertEqual(cluster.status, "dissolving")
+            self.assertFalse(self.c.relay_policy.failed)
+
+    async def test_unknown_primary_failure_does_not_imply_bad_network_route(self):
+        cluster = self.pair(); cluster.automatic, cluster.route_id = True, "lan-quic"
+        self.c._dissolve_cluster(cluster, "primary_aborted")
+        self.assertFalse(self.c.relay_policy.failed)
 
     async def test_catalog_counts_physical_gpus_once(self):
         first = self.machine("first")

@@ -167,6 +167,7 @@ class Job:
         self.done_event = asyncio.Event()
         self.result: Optional[dict] = None
         self.error: Optional[str] = None
+        self.upstream_status: Optional[int] = None
         self.elapsed_ms: Optional[float] = None
         self.cancelled: bool = False
         self.assigned_agent_id: Optional[str] = None

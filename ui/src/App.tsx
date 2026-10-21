@@ -872,7 +872,9 @@ function Chat({ apiKey }: { apiKey: string }) {
                 }} />
               ))}
               <span role="status" aria-live="polite" style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>
-                {chatPhase === "waiting_for_capacity"
+                {chatPhase === "waiting_for_route"
+                  ? "Waiting for a working connection between GPU machines…"
+                  : chatPhase === "waiting_for_capacity"
                   ? "Waiting for available GPUs — agents may still be reconnecting (up to 30 minutes)…"
                   : "Waiting for model setup or response…"}
               </span>

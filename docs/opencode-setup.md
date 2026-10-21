@@ -71,7 +71,7 @@ python3 scripts/run-opencode.py
 These saved profiles target this pair and send matching `options.num_ctx` values;
 they are not architectural limits. Setup preserves saved per-model overrides.
 The generator's portable defaults remain smaller for deployments with less VRAM.
-A Devstral API request without a context override starts a 4,096-token runtime.
+A distributed Devstral API request without a context override starts a 16,384-token runtime.
 Small client windows can cause OpenCode to compact repeatedly before editing;
 the saved windows leave more room for its instructions and tool definitions.
 The 8K Qwen profiles reserve 1,024 output tokens, leaving about 7K for input.
