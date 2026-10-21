@@ -35,7 +35,7 @@ continuations and conversation switching. See the pinned runtime's
 # Preview, then run against exactly two named online agents:
 python3 scripts/rpc-benchmark.py --hosts PRIMARY_HOST WORKER_HOST
 python3 scripts/rpc-benchmark.py --hosts PRIMARY_HOST WORKER_HOST --repeats 2 --apply
-python3 scripts/rpc-stream-smoke.py
+python3 scripts/rpc-stream-smoke.py --model devstral-small-2:24b --context 4096
 python3 scripts/opencode-smoke.py --timeout 900
 ```
 

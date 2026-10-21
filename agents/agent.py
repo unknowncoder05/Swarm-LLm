@@ -1813,6 +1813,7 @@ def run_rpc_primary(assignment, coordinator, api_key):
 
     proc = _launch_rpc_process(cmd, "primary")
 
+    write_status("RPC_PREPARING", f"loading {model}; first worker cache fill can take several minutes")
     step("Waiting for llama-server to be ready (model loading)...")
     load_timeout = assignment.get("load_timeout", 900)
     if assignment.get("transport") == "quic":
