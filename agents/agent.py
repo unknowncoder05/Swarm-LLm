@@ -786,6 +786,58 @@ def resolve_gguf(model):
             continue
     return None
 
+
+# Ollama's Devstral blob embeds vision tensors that upstream llama.cpp's text
+# loader rejects. Use an immutable, checksum-verified text GGUF for native RPC.
+# The ordinary Ollama path continues to use the library package unchanged.
+_NATIVE_MODEL_ARTIFACTS = {
+    "devstral-small-2:24b": {
+        "repository": "unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF",
+        "revision": "6e458b8add42681bfd023de5eab93637694aaf82",
+        "filename": "Devstral-Small-2-24B-Instruct-2512-Q4_K_M.gguf",
+        "size": 14334446752,
+        "sha256": "d14ba9edee1bb4c4996a726deb81e49ae81800a3216f0774634238c380aee496",
+    },
+}
+
+
+def resolve_native_gguf(model):
+    artifact = _NATIVE_MODEL_ARTIFACTS.get(model)
+    if not artifact:
+        return resolve_gguf(model)
+    cache = _context_paths()["root"] / "models"
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / (artifact["sha256"] + ".gguf")
+    if target.exists() and target.stat().st_size == artifact["size"]:
+        return str(target)  # Only a completely verified download is promoted here.
+    partial = target.with_suffix(".partial")
+    partial.unlink(missing_ok=True)
+    if shutil.disk_usage(cache).free < artifact["size"] + 256 * 1024**2:
+        raise RuntimeError("Not enough disk space for the native model: " + model)
+    url = "https://huggingface.co/{repository}/resolve/{revision}/{filename}".format(**artifact)
+    digest, downloaded, last_report = hashlib.sha256(), 0, 0.0
+    write_status("RPC_PREPARING", "downloading native Q4_K_M model " + model)
+    try:
+        with requests.get(url, stream=True, timeout=(15, 120)) as response, partial.open("wb") as output:
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                downloaded += len(chunk)
+                if downloaded > artifact["size"]:
+                    raise RuntimeError("Native model download exceeded its expected size")
+                output.write(chunk)
+                digest.update(chunk)
+                if time.time() - last_report >= 5:
+                    write_status("RPC_PREPARING", f"{downloaded * 100 // artifact['size']}% - native {model}")
+                    last_report = time.time()
+        if downloaded != artifact["size"] or digest.hexdigest() != artifact["sha256"]:
+            raise RuntimeError("Native model checksum/size mismatch: " + model)
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+    return str(target)
+
 # ---------------------------------------------------------------------------
 # RPC cluster execution helpers
 # ---------------------------------------------------------------------------
@@ -1712,7 +1764,7 @@ def run_rpc_primary(assignment, coordinator, api_key):
         except Exception as exc:
             raise RpcPreflightError("Route preflight failed before model startup") from exc
 
-    gguf_path = resolve_gguf(model)
+    gguf_path = resolve_native_gguf(model)
     if not gguf_path:
         write_status("RPC_PREPARING", f"pulling distributed model {model}")
         pull_model(_ollama_exe, model, _ollama_port)

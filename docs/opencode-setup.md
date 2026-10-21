@@ -22,8 +22,8 @@ installation/launch entry points on systems with Make.
 
 Setup asks for the API base URL and consumer key when needed, performs an
 authenticated `GET /v1/models`, and prints the advertised models. Select the
-default by number or model ID. Enter keeps the saved selection, initially
-`qwen3:30b-a3b`. The chosen model is used for both normal and background requests.
+default by number or model ID. Enter keeps the saved selection; this checkout
+defaults to `qwen3:14b`. The chosen model is used for both normal and background requests.
 The 30B A3B profile retains its 32,768-token context and reasoning; rerunning setup
 preserves a previously chosen smaller context unless `--context` is supplied.
 Existing providers,
@@ -52,6 +52,72 @@ pre-download it. The advertised list includes models that can be loaded on
 demand; it does not mean they are all already loaded or can all run at once.
 GPU capacity can change between listing and sending a prompt. Swarm admission
 checks still apply, and the client never silently substitutes a smaller model.
+
+### Qwen3 and Devstral on two 12 GB GPUs
+
+For a Qwen3 default with Devstral available for coding, run:
+
+```sh
+python3 scripts/setup-opencode.py --model qwen3:14b --title-model qwen3:14b
+python3 scripts/run-opencode.py
+```
+
+| Model | Placement on this pair | Saved OpenCode context |
+| --- | --- | --- |
+| `qwen3:14b` | One GPU; default for chat, background work and titles | 4,096 |
+| `qwen3:8b` | One GPU; selectable for lighter work | 2,048 |
+| `devstral-small-2:24b` | Both GPUs using native llama.cpp RPC | 2,048 |
+
+These are conservative client profiles, not architectural limits. A Devstral
+request without a context override starts a 4,096-token distributed runtime.
+Single-machine Qwen requests default to Ollama's top-level `think: false`, so
+short output budgets reach an answer. API callers can explicitly request
+`think: true`; returned Ollama thinking is exposed as `reasoning_content`.
+Distributed Qwen reasoning behavior is unchanged. See
+[Ollama's thinking controls](https://docs.ollama.com/capabilities/thinking).
+Qwen3 14B and 8B can process requests on separate machines. Devstral reserves
+the pair exclusively; Qwen requests must wait for those resources to be released.
+Missing weights download on the agents, and the first distributed load also
+transfers worker tensors. The model picker lists loadable models, not residency.
+
+The native Devstral path downloads the text-only Q4_K_M GGUF from
+[Unsloth's Devstral Small 2 repository](https://huggingface.co/unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF).
+Its revision, size and SHA-256 are pinned in the agent; incomplete or invalid
+downloads are discarded before startup. Allow about 14.4 GB of additional disk
+space on a machine acting as primary. Ollama's library blob bundles extra vision
+tensors that the unmodified native text loader rejects, so that blob is retained
+for the single-GPU Ollama path. The distributed route supports text and tools;
+it does not load an image projector. See
+[Ollama's artifact compatibility layer](https://github.com/ollama/ollama/blob/main/llama/compat/README.md)
+for the upstream packaging distinction.
+
+Devstral prefers Ollama when a single eligible GPU can hold it with the requested
+context. Otherwise the coordinator forms a native cluster, checking the route
+and reserving distinct physical hosts. A new machine does not change a live
+cluster or take its queued jobs. Ordinary and distributed jobs for the same model
+retain separate leases. Busy workers and older queued single-GPU jobs keep their
+reservations; a new distributed request receives a capacity rejection if it
+cannot obtain enough idle GPUs. No smaller model is substituted.
+
+For a Devstral session, change all OpenCode roles together to avoid background
+Qwen requests competing for the same two GPUs:
+
+```sh
+python3 scripts/setup-opencode.py --model devstral-small-2:24b --title-model devstral-small-2:24b
+python3 scripts/run-opencode.py
+```
+
+Use the first command above to restore the Qwen3 14B default. Rerun setup while
+the pair is available to refresh the picker, then start a fresh OpenCode session.
+Switching `/models` alone leaves background and title routing unchanged. An idle
+distributed cluster unloads after the configured RPC idle timeout (900 seconds
+on this deployment); an administrator can release it earlier using
+`POST /rpc/clusters/{cluster_id}/stop`. This endpoint refuses active requests,
+queued cluster work and open streams. Wait for both agents to acknowledge teardown
+before requesting a model that needs those GPUs. Capacity rejections carry
+`X-Swarm-Status: waiting_for_capacity` and `Retry-After: 5`; the dashboard can wait
+and retry without having accepted duplicate work. OpenCode may surface the 503
+instead, so retry after capacity is available.
 
 Check the live list without installing, changing config or starting inference:
 

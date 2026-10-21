@@ -73,7 +73,7 @@ try:
     from models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
     from persistence import CoordinatorRepository, _container_job_dict
     from security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
-    from catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES
+    from catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES, RPC_FALLBACK_MODELS
     from validation import validate_contract
     from placement import PlacementPolicy, _physical_host
     from admin_api import install_admin_routes
@@ -86,7 +86,7 @@ except ModuleNotFoundError:
     from coordinator.models import MachineState, PendingAgent, Job, ImageJob, VideoJob, _chat_payload_bytes
     from coordinator.persistence import CoordinatorRepository, _container_job_dict
     from coordinator.security import ApiKeyAuth, _ct_match, _extract_key, _RateLimiter, _real_ip
-    from coordinator.catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES
+    from coordinator.catalog import _RPC_MODELS, _RPC_DEFAULT_CONTEXT, _ON_DEMAND_MODELS, IMAGE_MODELS, VIDEO_MODELS, MODEL_ALIASES, RPC_FALLBACK_MODELS
     from coordinator.validation import validate_contract
     from coordinator.placement import PlacementPolicy, _physical_host
     from coordinator.admin_api import install_admin_routes
@@ -97,6 +97,7 @@ except ModuleNotFoundError:
 _RPC_MODELS = dict(_RPC_MODELS)
 _ON_DEMAND_MODELS = dict(_ON_DEMAND_MODELS)
 _RPC_DEFAULT_CONTEXT = dict(_RPC_DEFAULT_CONTEXT)
+RPC_FALLBACK_MODELS = dict(RPC_FALLBACK_MODELS)
 
 ADMIN_KEY    = os.environ.get("ADMIN_KEY", "")
 AGENT_KEY    = os.environ.get("AGENT_KEY", "")
@@ -365,6 +366,22 @@ def _rpc_cluster_for_machine(machine, model):
     return cluster if cluster and cluster.model == model else None
 
 
+def _rpc_memory_required(model, context=None, explicit_transport=False):
+    if model in _RPC_MODELS:
+        return _RPC_MODELS[model]
+    if model in RPC_FALLBACK_MODELS:
+        if (explicit_transport or _find_rpc_cluster_for_model(model)
+                or not any(m.alive and not m.in_rpc and _can_serve_single(m, model, context)
+                           for m in machines.values())):
+            return RPC_FALLBACK_MODELS[model]
+    return None
+
+
+def _job_matches_rpc_cluster(job, cluster):
+    return job.rpc_cluster_id == cluster.cluster_id or (
+        job.rpc_cluster_id is None and job.model in _RPC_MODELS and job.model == cluster.model)
+
+
 def _form_rpc_cluster(model: str, required_vram: float, ctx_size: int = 4096,
                       transport: str = "direct", regional=None, agent_ids=None, runtime=None) -> Optional[RpcCluster]:
     use_regional = transport == "relay" and (regional or (RPC_CLOUD_RELAY_ENABLED and RPC_RELAY_URL and
@@ -567,7 +584,8 @@ async def _recover_rpc_jobs_once():
             sum(j.rpc_cluster_id == c.cluster_id and not j.done_event.is_set() for j in jobs.values()),
             bool(machines[c.primary_id].busy))) if ready else None
         if not cluster:
-            cluster = await _form_automatic_rpc_cluster(job.model, _RPC_MODELS[job.model], ctx, job.rpc_agent_ids)
+            required = _RPC_MODELS.get(job.model, RPC_FALLBACK_MODELS.get(job.model))
+            cluster = await _form_automatic_rpc_cluster(job.model, required, ctx, job.rpc_agent_ids)
         if not cluster:
             continue
         job.rpc_cluster_id = cluster.cluster_id
@@ -600,7 +618,7 @@ def _dissolve_cluster(cluster: RpcCluster, reason: str = "idle") -> None:
         relay_policy.reject(cluster.route_id, [cluster.primary_id, *cluster.worker_ids])
     for job in list(jobs.values()):
         belongs = job.rpc_cluster_id == cluster.cluster_id
-        if job.rpc_cluster_id is None and job.model == cluster.model:
+        if job.rpc_cluster_id is None and job.model in _RPC_MODELS and job.model == cluster.model:
             belongs = (job.assigned_agent_id == cluster.primary_id or not any(
                 other is not cluster and other.model == cluster.model and other.status in ("forming", "active")
                 for other in rpc_clusters.values()))
@@ -654,7 +672,7 @@ async def _rpc_lifecycle_loop() -> None:
                     _dissolve_cluster(cluster, "form_timeout")
             elif cluster.status == "active":
                 last = cluster.last_job_at or cluster.formed_at
-                pending_work = any(job.model == cluster.model and job.rpc_cluster_id in (None, cid)
+                pending_work = any(_job_matches_rpc_cluster(job, cluster)
                                    and not job.done_event.is_set() for job in jobs.values())
                 idle = not pending_work and not any(machines[aid].busy for aid in members if aid in machines)
                 if idle and cluster.relay_url and cluster.relay_deadline and now >= cluster.relay_deadline - 300:
@@ -745,7 +763,8 @@ async def _await_chat_completion(job: Job, request: Request, user_id: str, start
                 await asyncio.wait_for(job.done_event.wait(), timeout=3.0)
                 return True
             except asyncio.TimeoutError:
-                cluster = rpc_clusters.get(job.rpc_cluster_id) if job.rpc_cluster_id else _find_rpc_cluster_for_model(job.model)
+                cluster = (rpc_clusters.get(job.rpc_cluster_id) if job.rpc_cluster_id else
+                           _find_rpc_cluster_for_model(job.model) if job.model in _RPC_MODELS else None)
                 capacity = bool(cluster) or getattr(job, "rpc_recovering", False) or any(
                     m.alive and not m.in_rpc and _can_serve_single(m, job.model) for m in machines.values())
                 timeout = JOB_TIMEOUT * (2 if cluster and cluster.transport == "relay" else 1) if capacity else 60
@@ -1227,7 +1246,7 @@ async def stop_idle_rpc_cluster(cluster_id: str, _key: str = Depends(require_adm
             or any(machines.get(aid) and machines[aid].busy for aid in members)
             or any(not job.done_event.is_set() and not job.cancelled
                    and (job.rpc_cluster_id == cluster_id or
-                        (job.rpc_cluster_id is None and job.model == cluster.model))
+                        (job.rpc_cluster_id is None and job.model in _RPC_MODELS and job.model == cluster.model))
                    for job in jobs.values())):
         raise HTTPException(409, "Cluster has active or queued work; retry when idle")
     _dissolve_cluster(cluster, "admin_idle")
@@ -1385,13 +1404,15 @@ async def queued_models(agent_id: Optional[str] = None, _key: str = Depends(requ
         return {"models": []}
     waiting = sorted(_queued_chat_jobs(), key=lambda job: job.created_at)
     return {"models": list(dict.fromkeys(job.model for job in waiting
-        if job.model not in _RPC_MODELS and (not machine or _can_serve_single(machine, job.model, job.body.get("options", {}).get("num_ctx")))))}
+        if job.model not in _RPC_MODELS and not job.rpc_cluster_id and not job.rpc_recovering
+        and (not machine or _can_serve_single(machine, job.model, job.body.get("options", {}).get("num_ctx")))))}
 
 @app.get("/agent/jobs/peek")
 async def peek_next_job(request: Request, model: str, _key: str = Depends(require_agent)):
     """Check if a job is waiting for this model WITHOUT consuming it. Returns 204 if none.
     Used by agents to detect demand before downloading a model on-demand."""
-    if _queued_chat_jobs(model):
+    if any(not job.rpc_cluster_id and not job.rpc_recovering and model not in _RPC_MODELS
+           for job in _queued_chat_jobs(model)):
         return Response(status_code=200)
     return Response(status_code=204)
 
@@ -1408,10 +1429,10 @@ async def get_next_job(request: Request, model: str, agent_id: Optional[str] = N
         job = jobs.get(machine.busy_job_id)
         valid = bool(job and not job.cancelled and not job.done_event.is_set()
                      and job.assigned_agent_id == agent_id and job.claim_token == machine.busy_claim_token)
-        if valid and model in _RPC_MODELS:
+        if valid and (model in _RPC_MODELS or job.rpc_cluster_id):
             cluster = _rpc_cluster_for_machine(machine, model)
             valid = bool(cluster and cluster.status == "active" and cluster.primary_id == agent_id
-                         and job.rpc_cluster_id in (None, cluster.cluster_id)
+                         and _job_matches_rpc_cluster(job, cluster)
                          and all(aid in machines and machines[aid].alive and machines[aid].last_seen_ago <= DEAD_AFTER_SEC
                                  for aid in [cluster.primary_id, *cluster.worker_ids]))
         elif valid:
@@ -1422,8 +1443,9 @@ async def get_next_job(request: Request, model: str, agent_id: Optional[str] = N
         # receipt so it can acknowledge cancellation without starting inference.
         return {"id": machine.busy_job_id, "claim_token": machine.busy_claim_token,
                 "body_json": "{}", "cancelled": True}
-    if model in _RPC_MODELS:
-        cluster = _rpc_cluster_for_machine(machine, model)
+    cluster = _rpc_cluster_for_machine(machine, model)
+    rpc_claim = model in _RPC_MODELS or cluster is not None
+    if rpc_claim:
         if (not cluster or cluster.primary_id != agent_id or not cluster.primary_ready
                 or cluster.status != "active" or machine.busy or any(
                     member not in machines or not machines[member].alive
@@ -1442,11 +1464,12 @@ async def get_next_job(request: Request, model: str, agent_id: Optional[str] = N
             if job.cancelled or job.done_event.is_set() or job.assigned_agent_id is not None:
                 print(f"[coordinator] Draining cancelled job {job.id[:8]} from queue ({job.model})")
                 continue
-            if model not in _RPC_MODELS and not _can_serve_single(machine, model, job.body.get("options", {}).get("num_ctx")):
+            if not rpc_claim and (job.rpc_cluster_id or job.rpc_recovering
+                    or not _can_serve_single(machine, model, job.body.get("options", {}).get("num_ctx"))):
                 q.put_nowait(job)
                 continue
-            if model in _RPC_MODELS:
-                if job.rpc_cluster_id not in (None, cluster.cluster_id):
+            if rpc_claim:
+                if not _job_matches_rpc_cluster(job, cluster):
                     q.put_nowait(job)
                     continue
                 job.rpc_cluster_id = cluster.cluster_id
@@ -1522,6 +1545,8 @@ async def submit_job_result(
         finish_reason = "tool_calls" if tool_calls else done_reason
 
         message: dict = {"role": msg.get("role", "assistant"), "content": msg.get("content")}
+        if msg.get("thinking"):
+            message["reasoning_content"] = msg["thinking"]
         if tool_calls:
             message["tool_calls"] = tool_calls
 
@@ -1574,13 +1599,11 @@ async def list_models(_key: str = Depends(require_consumer)):
                 "created": int(m.registered_at), "owned_by": "swarm-llm",
             }
     # Include RPC models that have enough idle GPU capacity to form a cluster
-    for rpc_model, req_vram in _RPC_MODELS.items():
+    for rpc_model, req_vram in {**_RPC_MODELS, **RPC_FALLBACK_MODELS}.items():
         if rpc_model not in seen:
-            avail_vram = sum(
-                (m.gpu_vram_gb or 0) for m in machines.values()
-                if _worker_available(m) and (m.gpu_vram_gb or 0) > 0
-            )
-            if avail_vram >= req_vram or _find_rpc_cluster_for_model(rpc_model):
+            if _on_demand_capacity(rpc_model):
+                continue  # Publish the ordinary path below when one GPU can fit it.
+            if _select_rpc_machines(req_vram) or _find_rpc_cluster_for_model(rpc_model):
                 seen[rpc_model] = {
                     "id": rpc_model, "object": "model",
                     "created": int(time.time()), "owned_by": "swarm-llm-rpc",
@@ -1727,7 +1750,8 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
             runtime_override = validate_runtime(runtime_override)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
-        if requested_model not in _RPC_MODELS or body.get("rpc_transport") != "quic" or not body.get("rpc_agent_ids"):
+        if (requested_model not in _RPC_MODELS and requested_model not in RPC_FALLBACK_MODELS
+                or body.get("rpc_transport") != "quic" or not body.get("rpc_agent_ids")):
             raise HTTPException(422, "RPC tuning requires an explicitly pinned QUIC pair")
     explicit_context = "num_ctx" in body["options"]
     _check_chat_queue_capacity(requested_model, _chat_payload_bytes(body))
@@ -1735,7 +1759,8 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
 
     # RPC models are served by dynamically formed multi-machine clusters, not by
     # individual Ollama agents — skip the "any_registered" check for them.
-    _rpc_vram_needed = _RPC_MODELS.get(requested_model)
+    _rpc_vram_needed = _rpc_memory_required(requested_model, body["options"].get("num_ctx"),
+                                          "rpc_transport" in body or "rpc_agent_ids" in body)
     if _rpc_vram_needed:
         selected_ids = body.get("rpc_agent_ids")
         if selected_ids is not None:
@@ -1833,6 +1858,7 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
                 503,
                 f"Model '{requested_model}' needs ~{required_vram:.1f} GB VRAM including headroom. "
                 f"Eligible workers: {available or 'none'}.",
+                headers={"X-Swarm-Status": "waiting_for_capacity", "Retry-After": "5"},
             )
 
     # Capture stream intent before forcing non-streaming for the agent.
@@ -1882,13 +1908,6 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
         if body.get(parameter) is not None:
             body.setdefault("options", {}).setdefault(parameter, body[parameter])
 
-    # Disable qwen3 thinking mode. On 12GB machines the model weights take 9.3GB,
-    # leaving ~17K tokens for the KV cache total. Thinking tokens consume most of
-    # that window before the real answer begins, causing truncation. Since we strip
-    # <think> blocks from the response anyway, the tokens are wasted.
-    if not _rpc_vram_needed and "qwen3" in requested_model and "think" not in body.get("options", {}):
-        body.setdefault("options", {})["think"] = False
-
     # Build a clean Ollama-native /api/chat body, dropping all OpenAI-only fields
     # (tool_choice, response_format, frequency_penalty, presence_penalty, n, logprobs,
     # top_logprobs, user, etc.) that Ollama's native parser rejects.
@@ -1898,6 +1917,14 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
         "stream":   False,
         "options":  body.get("options", {}),
     }
+    if not _rpc_vram_needed:
+        # Ollama expects think beside options, not inside it. Preserve explicit
+        # opt-ins (including the legacy nested field); default Qwen to no thinking
+        # so a bounded output budget can reach the actual answer.
+        think = ollama_body["options"].pop("think", False if "qwen3" in requested_model else None)
+        think = body.get("think", think)
+        if think is not None:
+            ollama_body["think"] = think
     if body.get("tools"):
         ollama_body["tools"] = body["tools"]
     if body.get("keep_alive") is not None:

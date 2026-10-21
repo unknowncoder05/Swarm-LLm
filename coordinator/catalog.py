@@ -10,6 +10,9 @@ _RPC_MODELS: dict[str, float] = {
 
 _RPC_DEFAULT_CONTEXT = {"qwen3:30b-a3b": 32768, "qwen3.8:27b-q4_K_M": 32768}
 
+# Prefer Ollama on a sufficiently large single GPU; otherwise form a native pair.
+RPC_FALLBACK_MODELS = {"devstral-small-2:24b": 17.0}
+
 # Resolve the upstream model ID to an explicit artifact supported by our runtime.
 MODEL_ALIASES = {
     "Qwen/Qwen3.8-27B": "qwen3.8:27b-q4_K_M",

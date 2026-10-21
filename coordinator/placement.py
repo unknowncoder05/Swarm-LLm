@@ -112,23 +112,23 @@ class PlacementPolicy:
         # so a new RPC request cannot consume all its still-unclaimed capacity.
         reserved = set()
         for job in sorted(self.queued_jobs(), key=lambda item: item.created_at):
-            if job.model in self.rpc_models:
+            if job.model in self.rpc_models or job.rpc_cluster_id or job.rpc_recovering:
                 continue
             candidates = [
                 m
                 for m in idle
-                if m.agent_id not in reserved
+                if _physical_host(m) not in reserved
                 and self.can_serve_single(
                     m, job.model, job.body.get("options", {}).get("num_ctx")
                 )
             ]
             if candidates:
-                reserved.add(
+                reserved.add(_physical_host(
                     min(
                         candidates, key=lambda m: (m.gpu_vram_gb or 0, m.agent_id)
-                    ).agent_id
-                )
-        idle = [m for m in idle if m.agent_id not in reserved]
+                    )
+                ))
+        idle = [m for m in idle if _physical_host(m) not in reserved]
         unique_hosts = set()
         unique_idle = []
         for machine in idle:

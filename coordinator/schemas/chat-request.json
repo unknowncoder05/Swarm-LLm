@@ -72,6 +72,9 @@
     "options": {
       "type": "object",
       "properties": {
+        "think": {
+          "type": ["boolean", "string", "null"]
+        },
         "num_predict": {
           "type": "integer",
           "anyOf": [
@@ -98,6 +101,9 @@
     },
     "stream": {
       "type": "boolean"
+    },
+    "think": {
+      "type": ["boolean", "string", "null"]
     },
     "stream_options": {
       "type": "object"

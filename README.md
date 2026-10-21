@@ -66,6 +66,12 @@ Ordinary requests prefer a ready replica with less pending work. Each physical
 host has one workload reservation shared by chat, distributed inference, media
 and container jobs, preventing those workloads from independently claiming it.
 
+On two 12 GB GPUs, `qwen3:14b` and `qwen3:8b` each use one machine, while
+`devstral-small-2:24b` can span both. Devstral also supports the ordinary Ollama
+path when a larger single GPU can fit its requested context. See the
+[Qwen3 and Devstral workflow](docs/opencode-setup.md#qwen3-and-devstral-on-two-12-gb-gpus)
+for OpenCode defaults, model switching and exclusive capacity requirements.
+
 More GPUs help models fit and can increase throughput. They do not necessarily
 make an individual reply faster: layer splitting adds synchronization and network
 traffic. See [performance controls](docs/performance.md) for repeatable comparisons.

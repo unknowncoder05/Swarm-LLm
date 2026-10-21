@@ -83,6 +83,23 @@ jobs. Joining machines do not replace active members, create replicas automatica
 or rebalance a running model. Older queued single-machine demand retains eligible
 capacity during new RPC selection.
 
+The catalog distinguishes native-only models from models with an optional native
+fallback. `devstral-small-2:24b` prefers an eligible single-GPU Ollama worker; if
+none can fit its requested context, admission uses the distributed path. An
+existing matching native replica is reused. Jobs bind to the chosen execution
+path: ordinary agents cannot claim distributed work, and native primaries cannot
+claim unbound ordinary work for the same model. Recovery retains native ownership;
+dissolving a replica does not cancel independent Ollama jobs. Both paths preserve
+the requested model. On two 12 GB GPUs, Devstral reserves the pair and Qwen3 models
+wait until it is released.
+
+Native Devstral uses a separately cached text Q4_K_M artifact, pinned to a
+publisher revision and checksum. The agent streams it to a temporary file with
+disk-space and size bounds, and promotes it only after hash verification. It does
+not pass Ollama's combined text/vision blob to the upstream native text loader.
+Other native models retain Ollama-blob reuse; single-device Devstral still uses
+the original Ollama library package.
+
 Claims carry attempt tokens. Late results, old teardown acknowledgments and lost
 claim-response retries cannot overwrite a newer attempt or free its reservation.
 Cancellation fences the logical job immediately, while the physical reservation

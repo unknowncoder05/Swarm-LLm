@@ -17,10 +17,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url")
     parser.add_argument("--model", help="Swarm model ID; defaults to the selected OpenCode model")
+    parser.add_argument("--context", type=int, choices=range(512, 32769), metavar="512..32768",
+                        help="Context tokens; defaults to the selected model's saved profile")
     parser.add_argument("--timeout", type=int, default=240)
     args = parser.parse_args()
     config = json.loads((ROOT / "opencode.json").read_text())
     model = args.model or config.get("model", "swarm-llm/qwen3:30b-a3b").split("/", 1)[-1]
+    profile = config["provider"]["swarm-llm"].get("models", {}).get(model, {})
+    context = args.context or profile.get("limit", {}).get("context", 4096)
     base = args.base_url or config["provider"]["swarm-llm"]["options"]["baseURL"]
     if base == BASE_URL_ENV:
         base = load_base_url(ROOT)
@@ -29,7 +33,7 @@ def main():
         parser.error("A consumer key is required")
     body = {"model": model, "stream": True, "stream_options": {"include_usage": True},
         "messages": [{"role": "user", "content": "What is 7 multiplied by 8? Reply with only the number."}],
-        "temperature": 0, "max_tokens": 512, "options": {"num_ctx": 32768}}
+        "temperature": 0, "max_tokens": 512, "options": {"num_ctx": context}}
     request = urllib.request.Request(base.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
         headers={"X-API-Key": key, "Content-Type": "application/json", "X-User-ID": "rpc-stream-smoke"})
     start = time.monotonic(); chunks = []; first_delta = None; first_event = None; done = False
@@ -59,7 +63,7 @@ def main():
     answer = "".join(c.get("delta", {}).get("content") or "" for e in chunks for c in e.get("choices", []))
     usage = [e["usage"] for e in chunks if e.get("usage")]
     finishes = [c["finish_reason"] for e in chunks for c in e.get("choices", []) if c.get("finish_reason")]
-    result = {"model": model, "headers_seconds": round(headers_at, 3), "first_event_seconds": first_event,
+    result = {"model": model, "context": context, "headers_seconds": round(headers_at, 3), "first_event_seconds": first_event,
         "first_delta_seconds": first_delta, "elapsed_seconds": round(elapsed, 3), "answer": answer,
         "event_count": len(chunks), "usage": usage, "finish_reasons": finishes,
         "reasoning_present": any(c.get("delta", {}).get("reasoning_content") for e in chunks for c in e.get("choices", [])),
