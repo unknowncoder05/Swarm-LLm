@@ -571,24 +571,26 @@ async def _recover_rpc_jobs_once():
         if old and any(agent_rpc_assignments.get(aid, {}).get("cluster_id") == old.cluster_id
                        for aid in [old.primary_id, *old.worker_ids]):
             continue  # Native role owners must acknowledge teardown before another attempt.
-        if time.time() - job.created_at > JOB_TIMEOUT or job.rpc_recoveries > 3:
+        if time.time() - job.created_at > (job.rpc_timeout or JOB_TIMEOUT) or job.rpc_recoveries > 3:
             _cancel_job(job.id, "rpc_recovery_exhausted")
             continue
         ctx = job.body.get("options", {}).get("num_ctx", 4096)
-        ready = [c for c in rpc_clusters.values() if c.model == job.model and c.status == "active"
-                 and c.primary_ready and c.ctx_size >= ctx
+        candidates = [c for c in rpc_clusters.values() if c.model == job.model and c.status in ("forming", "active")
+                 and (c.status == "forming" or c.primary_ready) and c.ctx_size >= ctx
                  and (not job.rpc_agent_ids or set(job.rpc_agent_ids) == {c.primary_id, *c.worker_ids})
                  and all(aid in machines and machines[aid].alive for aid in [c.primary_id, *c.worker_ids])
                  and not (c.relay_url and c.relay_deadline and c.relay_deadline <= time.time() + 300)]
-        cluster = min(ready, key=lambda c: (
+        cluster = min(candidates, key=lambda c: (c.status != "active",
             sum(j.rpc_cluster_id == c.cluster_id and not j.done_event.is_set() for j in jobs.values()),
-            bool(machines[c.primary_id].busy))) if ready else None
+            bool(machines[c.primary_id].busy))) if candidates else None
         if not cluster:
             required = _RPC_MODELS.get(job.model, RPC_FALLBACK_MODELS.get(job.model))
             cluster = await _form_automatic_rpc_cluster(job.model, required, ctx, job.rpc_agent_ids)
         if not cluster:
             continue
         job.rpc_cluster_id = cluster.cluster_id
+        job.rpc_timeout = max(job.rpc_timeout or JOB_TIMEOUT,
+                              JOB_TIMEOUT * (2 if cluster.transport == "relay" else 1))
         job.assigned_agent_id = None
         job.claim_token = None
         if job.live_stream is not None:
@@ -768,6 +770,8 @@ async def _await_chat_completion(job: Job, request: Request, user_id: str, start
                 capacity = bool(cluster) or getattr(job, "rpc_recovering", False) or any(
                     m.alive and not m.in_rpc and _can_serve_single(m, job.model) for m in machines.values())
                 timeout = JOB_TIMEOUT * (2 if cluster and cluster.transport == "relay" else 1) if capacity else 60
+                if capacity and job.rpc_timeout:
+                    timeout = max(timeout, job.rpc_timeout)
                 if time.time() - started_at >= timeout:
                     _cancel_job(job.id, "timeout")
                     _log_usage(job.model, user_id, 0, 0, None, False, finish_reason="timeout")
@@ -1936,6 +1940,7 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
     job = Job(body=ollama_body, model=requested_model)
     if _rpc_vram_needed:
         job.rpc_cluster_id = (created_cluster or cluster).cluster_id
+        job.rpc_timeout = JOB_TIMEOUT * (2 if (created_cluster or cluster).transport == "relay" else 1)
         job.rpc_agent_ids = selected_ids
         primary = machines.get((created_cluster or cluster).primary_id)
         if consumer_wants_stream and primary and (primary.runtime or {}).get("rpc_stream"):

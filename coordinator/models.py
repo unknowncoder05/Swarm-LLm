@@ -176,6 +176,7 @@ class Job:
         self.rpc_recovering = False
         self.rpc_agent_ids = None
         self.rpc_recoveries = 0
+        self.rpc_timeout: Optional[float] = None
         self.live_stream = None
         self.stream_started = False
 

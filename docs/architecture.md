@@ -100,6 +100,11 @@ not pass Ollama's combined text/vision blob to the upstream native text loader.
 Other native models retain Ollama-blob reuse; single-device Devstral still uses
 the original Ollama library package.
 
+Recovering requests can join a matching forming replica after old role owners
+acknowledge teardown, rather than wait for readiness or try to reserve another
+pair. Ready replicas remain preferred. Relay recovery retains the longer request
+budget, measured from the original enqueue time; retries never reset that clock.
+
 Claims carry attempt tokens. Late results, old teardown acknowledgments and lost
 claim-response retries cannot overwrite a newer attempt or free its reservation.
 Cancellation fences the logical job immediately, while the physical reservation

@@ -1,5 +1,6 @@
 """One model may use Ollama or a reserved native cluster without mixing leases."""
 import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
 from scheduling_support import SchedulingFixture
@@ -91,6 +92,32 @@ class HybridModelTests(SchedulingFixture):
         self.assertEqual((await self.claim("new", MODEL)).status_code, 204)
         response = await self.client.get("/agent/jobs/queued-models?agent_id=new", headers=self.headers)
         self.assertEqual(response.json()["models"], [])
+
+    async def test_recovering_requests_share_forming_replica_and_keep_original_relay_budget(self):
+        cluster = self.pair()
+        cluster.status, cluster.primary_ready, cluster.transport = "forming", False, "relay"
+        first, second = self.enqueue(MODEL), self.enqueue(MODEL)
+        for job in (first, second):
+            job.rpc_recovering = True
+            job.rpc_cluster_id = "old-removed-cluster"
+        with patch.object(self.c, "_form_automatic_rpc_cluster", new=AsyncMock()) as form:
+            await self.c._recover_rpc_jobs_once()
+            form.assert_not_awaited()
+        for job in (first, second):
+            self.assertEqual(job.rpc_cluster_id, cluster.cluster_id)
+            self.assertFalse(job.rpc_recovering)
+            self.assertEqual(job.rpc_timeout, 2 * self.c.JOB_TIMEOUT)
+        self.assertEqual(len(self.c._queued_chat_jobs()), 2)
+        first.rpc_recovering = True
+        first.rpc_cluster_id = "old-removed-cluster"
+        first.created_at = time.time() - self.c.JOB_TIMEOUT - 1
+        await self.c._recover_rpc_jobs_once()
+        self.assertFalse(first.cancelled)
+        first.rpc_recovering = True
+        first.rpc_cluster_id = "old-removed-cluster"
+        first.created_at = time.time() - 2 * self.c.JOB_TIMEOUT - 1
+        await self.c._recover_rpc_jobs_once()
+        self.assertTrue(first.cancelled)
 
     async def test_partial_capacity_rejects_without_accepting_work(self):
         self.machine("alone")
