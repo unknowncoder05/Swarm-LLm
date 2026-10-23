@@ -25,7 +25,7 @@ def main():
         headers = {"X-API-Key": values["CONSUMER_KEY" if consumer else "ADMIN_KEY"], "Content-Type": "application/json"}
         if user:
             headers["X-User-ID"] = user
-        request = urllib.request.Request("http://127.0.0.1:8081/swarm/api" + path,
+        request = urllib.request.Request("http://127.0.0.1:8081/peerfoundry/api" + path,
             data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
         with urllib.request.urlopen(request, timeout=300 if payload else 10) as response:
             return json.load(response)

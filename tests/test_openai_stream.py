@@ -32,6 +32,7 @@ class OpenAIStreamTests(unittest.IsolatedAsyncioTestCase):
     async def stream(self, result, include_usage=False):
         task = asyncio.create_task(self.client.post("/v1/chat/completions", headers={"X-API-Key": "consumer"},
             json={"model": "qwen3:30b-a3b", "stream": True, "stream_options": {"include_usage": include_usage},
+                  "options": {"num_ctx": 4096},  # Match the pre-existing fixture runtime.
                   "messages": [{"role": "user", "content": "Read these two files"}]}))
         for _ in range(100):
             if self.c.jobs or task.done():

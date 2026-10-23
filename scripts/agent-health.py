@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:8081/swarm/api")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8081/peerfoundry/api")
     parser.add_argument("--public-url", default=load_base_url(ROOT).rsplit("/api/v1", 1)[0])
     parser.add_argument("--hosts", nargs="+", help="Audit these hostnames; otherwise all live GPU agents")
     parser.add_argument("--expected-machines", type=int, default=2)
@@ -105,7 +105,7 @@ def main():
             observed = set()
             smoke_start = time.monotonic()
             def infer(index, model):
-                expected = f"SWARM_READY_{index}"
+                expected = f"PEERFOUNDRY_READY_{index}"
                 response = api("/v1/chat/completions", {"model": model, "stream": False,
                     "messages": [{"role": "user", "content": f"Reply with exactly {expected} and nothing else."}],
                     "temperature": 0, "options": {"num_ctx": 2048}}, timeout=600)

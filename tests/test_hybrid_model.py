@@ -45,7 +45,18 @@ class HybridModelTests(SchedulingFixture):
         cluster = self.c.rpc_clusters[job.rpc_cluster_id]
         self.assertEqual({cluster.primary_id, *cluster.worker_ids}, {"primary", "worker"})
         self.assertEqual(job.body["options"]["temperature"], .15)
-        self.assertEqual(job.body["options"]["num_ctx"], 16384)
+        self.assertEqual(job.body["options"]["num_ctx"], 32768)
+
+    async def test_long_devstral_prompt_forms_cluster_with_32k_context(self):
+        self.machine("primary")
+        self.machine("worker")
+        job = await self.finish_admission(
+            messages=[{"role": "user", "content": "x" * 54000}],
+            rpc_transport="direct",
+        )
+        cluster = self.c.rpc_clusters[job.rpc_cluster_id]
+        self.assertEqual(cluster.ctx_size, 32768)
+        self.assertEqual(job.body["options"]["num_ctx"], 32768)
 
     async def test_large_single_gpu_keeps_ordinary_ollama_path(self):
         self.machine("large", 24)

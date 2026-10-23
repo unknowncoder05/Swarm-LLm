@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swarm-llm Agent  -  Python version
+PeerFoundry Agent  -  Python version
 Works on Windows, Linux, macOS wherever Python 3.8+ is available.
 
 Usage (non-interactive):
@@ -114,8 +114,10 @@ def _apply_update(new_code: str) -> None:
         current_file.write_text(new_code, encoding="utf-8")
         target = current_file
     except Exception:
-        tmp = Path(_tf.mktemp(suffix="_swarm_agent.py"))
-        tmp.write_text(new_code, encoding="utf-8")
+        fd, temporary = _tf.mkstemp(suffix="_peerfoundry_agent.py")
+        tmp = Path(temporary)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(new_code)
         target = tmp
     print(_c("\033[33m", f"  [update] restarting as {target}..."))
     if platform.system() != "Windows":
@@ -174,7 +176,7 @@ def write_status(phase, detail=""):
 def show_banner():
     print()
     print(_c(CYAN, "  +-------------------------------------------------------+"))
-    print(_c(CYAN, "  |         swarm-llm Agent  -  Python Edition            |"))
+    print(_c(CYAN, "  |         PeerFoundry Agent  -  Python Edition            |"))
     print(_c(CYAN, "  |         TLS ON  |  API Key Auth ON                    |"))
     print(_c(CYAN, "  +-------------------------------------------------------+"))
     print()
@@ -467,7 +469,7 @@ def install_llamacpp():
     step("Fetching latest llama.cpp release from GitHub...")
     req = Request(
         "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
-        headers={"User-Agent": "swarm-llm-agent"},
+        headers={"User-Agent": "peerfoundry-agent"},
     )
     try:
         with urlopen(req, timeout=20) as resp:
@@ -2125,7 +2127,7 @@ def main():
     global _coordinator, _api_key, _model, _agent_id, _hw
     global _ollama_proc, _ollama_port, _ollama_exe
 
-    parser = argparse.ArgumentParser(description="swarm-llm agent")
+    parser = argparse.ArgumentParser(description="peerfoundry agent")
     parser.add_argument("--coordinator",     default="")
     parser.add_argument("--api-key",         default="")
     parser.add_argument("--model",           default="",

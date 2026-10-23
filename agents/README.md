@@ -1,6 +1,6 @@
-# swarm-llm agents
+# peerfoundry agents
 
-This repository contains two pull-based workers for the swarm-llm coordinator:
+This repository contains two pull-based workers for the peerfoundry coordinator:
 
 - `agent.py` serves Ollama chat and media inference jobs.
 - `container_agent.py` runs finite Docker/OCI batch jobs and returns their logs,
@@ -59,28 +59,28 @@ matches the platform reported by its Docker daemon.
 ### Linux installation
 
 ```bash
-sudo install -d /opt/swarm-llm
+sudo install -d /opt/peerfoundry
 sudo curl -fsS \
-  https://swarm.example.com/swarm/agent/container_agent.py \
-  -o /opt/swarm-llm/container_agent.py
+  https://peerfoundry.example.com/peerfoundry/agent/container_agent.py \
+  -o /opt/peerfoundry/container_agent.py
 sudo python3 -m pip install requests
 ```
 
-Create `/etc/swarm-container-agent.env`:
+Create `/etc/peerfoundry-container-agent.env`:
 
 ```text
-SWARM_AGENT_KEY=replace-with-the-agent-key
+PEERFOUNDRY_AGENT_KEY=replace-with-the-agent-key
 ```
 
 Install and enable the included service definition after checking its
 coordinator URL and script path:
 
 ```bash
-sudo cp container-agent.service.example /etc/systemd/system/swarm-container-agent.service
-sudo chmod 600 /etc/swarm-container-agent.env
+sudo cp container-agent.service.example /etc/systemd/system/peerfoundry-container-agent.service
+sudo chmod 600 /etc/peerfoundry-container-agent.env
 sudo systemctl daemon-reload
-sudo systemctl enable --now swarm-container-agent
-sudo journalctl -u swarm-container-agent -f
+sudo systemctl enable --now peerfoundry-container-agent
+sudo journalctl -u peerfoundry-container-agent -f
 ```
 
 ### Windows installation
@@ -92,14 +92,14 @@ runtime is preinstalled.
 From an elevated PowerShell session:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\swarm | Out-Null
+New-Item -ItemType Directory -Force C:\peerfoundry | Out-Null
 Invoke-WebRequest `
-  "https://swarm.example.com/swarm/agent/container_agent.py" `
-  -OutFile C:\swarm\container_agent.py
+  "https://peerfoundry.example.com/peerfoundry/agent/container_agent.py" `
+  -OutFile C:\peerfoundry\container_agent.py
 py -m pip install requests
-$env:SWARM_AGENT_KEY = "replace-with-the-agent-key"
-py C:\swarm\container_agent.py `
-  --coordinator https://swarm.example.com/swarm/api
+$env:PEERFOUNDRY_AGENT_KEY = "replace-with-the-agent-key"
+py C:\peerfoundry\container_agent.py `
+  --coordinator https://peerfoundry.example.com/peerfoundry/api
 ```
 
 For unattended operation, run that command as a Windows scheduled task under
@@ -109,14 +109,14 @@ do not embed it in a container job.
 ### Direct invocation
 
 ```bash
-export SWARM_AGENT_KEY='replace-with-the-agent-key'
+export PEERFOUNDRY_AGENT_KEY='replace-with-the-agent-key'
 python3 container_agent.py \
-  --coordinator https://swarm.example.com/swarm/api \
+  --coordinator https://peerfoundry.example.com/peerfoundry/api \
   --poll-seconds 3
 ```
 
 The worker creates a stable identifier in
-`~/.swarm-llm/container-agent-id`, registers as model `container-runtime`, and
+`~/.peerfoundry/container-agent-id`, registers as model `container-runtime`, and
 sends heartbeats every 15 seconds.
 
 ## Submitting a container job
@@ -125,7 +125,7 @@ Container jobs are created through the coordinator, not through the worker.
 The endpoint requires the coordinator admin key.
 
 ```bash
-curl -X POST https://swarm.example.com/swarm/api/container/jobs \
+curl -X POST https://peerfoundry.example.com/peerfoundry/api/container/jobs \
   -H "X-API-Key: $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -163,10 +163,10 @@ Inspect and download the result with:
 
 ```bash
 curl -H "X-API-Key: $ADMIN_KEY" \
-  https://swarm.example.com/swarm/api/container/jobs/JOB_ID
+  https://peerfoundry.example.com/peerfoundry/api/container/jobs/JOB_ID
 
 curl -H "X-API-Key: $ADMIN_KEY" \
-  https://swarm.example.com/swarm/api/container/jobs/JOB_ID/artifacts \
+  https://peerfoundry.example.com/peerfoundry/api/container/jobs/JOB_ID/artifacts \
   -o artifacts.tar.gz
 ```
 
@@ -199,4 +199,4 @@ environment variables unless the coordinator database is protected accordingly.
 The Windows path was exercised end to end on a `t3.medium` EC2 instance using
 the Windows Server 2022 ECS-optimized AMI. A Nano Server LTSC 2022 job wrote
 `result.txt`; the worker uploaded a tar archive and the coordinator returned the
-verified content `swarm-windows-e2e-ok` with exit code `0`.
+verified content `peerfoundry-windows-e2e-ok` with exit code `0`.

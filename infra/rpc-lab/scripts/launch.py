@@ -14,7 +14,7 @@ def configure_agent(agent, config):
         "llama_rpc_server": "/usr/local/bin/llama-rpc-server",
     }
     agent.ensure_llamacpp = lambda: bins
-    agent.find_ollama = lambda: "/opt/swarm/ollama/bin/ollama"
+    agent.find_ollama = lambda: "/opt/peerfoundry/ollama/bin/ollama"
     agent._ollama_models_dir = lambda: Path(os.environ["OLLAMA_MODELS"])
     agent._check_for_update = lambda *args, **kwargs: None
     agent.start_media_loop = lambda *args, **kwargs: None
@@ -35,7 +35,7 @@ def configure_agent(agent, config):
 
 
 def main():
-    config = json.loads(Path("/opt/swarm/config.json").read_text())
+    config = json.loads(Path("/opt/peerfoundry/config.json").read_text())
     value = subprocess.check_output([
         "aws", "ssm", "get-parameter", "--region", config["region"],
         "--name", config["key_parameter"], "--with-decryption",

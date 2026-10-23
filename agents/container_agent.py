@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pull-based, constrained Docker job worker for swarm-llm."""
+"""Pull-based, constrained Docker job worker for peerfoundry."""
 
 from __future__ import annotations
 
@@ -101,15 +101,15 @@ def archive_artifacts(workspace: Path, patterns: list[str], destination: Path) -
 
 def run_job(job: dict, base_url: str, headers: dict, agent_id: str) -> None:
     job_id = job["id"]
-    container = f"swarm-job-{job_id}"
-    volume = f"swarm-job-{job_id}"
+    container = f"peerfoundry-job-{job_id}"
+    volume = f"peerfoundry-job-{job_id}"
     started = time.monotonic()
     exit_code = 125
     error = None
     is_windows = (job.get("platform") or "").startswith("windows/")
     container_workspace = "C:/workspace" if is_windows else "/workspace"
 
-    with tempfile.TemporaryDirectory(prefix="swarm-container-") as temp:
+    with tempfile.TemporaryDirectory(prefix="peerfoundry-container-") as temp:
         temp_path = Path(temp)
         stdout_path, stderr_path = temp_path / "stdout", temp_path / "stderr"
         workspace = temp_path / "workspace"
@@ -205,18 +205,18 @@ def run_job(job: dict, base_url: str, headers: dict, agent_id: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="swarm-llm container worker")
-    parser.add_argument("--coordinator", required=True, help="Coordinator API URL, e.g. https://host/swarm/api")
-    parser.add_argument("--api-key", default=os.environ.get("SWARM_AGENT_KEY"), help="Agent key or SWARM_AGENT_KEY")
+    parser = argparse.ArgumentParser(description="peerfoundry container worker")
+    parser.add_argument("--coordinator", required=True, help="Coordinator API URL, e.g. https://host/peerfoundry/api")
+    parser.add_argument("--api-key", default=os.environ.get("PEERFOUNDRY_AGENT_KEY"), help="Agent key or PEERFOUNDRY_AGENT_KEY")
     parser.add_argument("--poll-seconds", type=float, default=3)
     args = parser.parse_args()
     if not args.api_key:
-        parser.error("--api-key or SWARM_AGENT_KEY is required")
+        parser.error("--api-key or PEERFOUNDRY_AGENT_KEY is required")
     docker("version", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     base_url = args.coordinator.rstrip("/")
     headers = {"X-API-Key": args.api_key}
-    state = Path.home() / ".swarm-llm" / "container-agent-id"
+    state = Path.home() / ".swarm" / "container-agent-id"
     agent_id = load_agent_id(state)
     worker_platform = docker_platform()
     register(base_url, headers, agent_id)

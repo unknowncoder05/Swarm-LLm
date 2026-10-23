@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const out = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-chat-test-'));
+const out = fs.mkdtempSync(path.join(os.tmpdir(), 'peerfoundry-chat-test-'));
 after(() => fs.rmSync(out, { recursive: true, force: true }));
 execFileSync(path.join(root, 'node_modules/.bin/tsc'), [
   '--target', 'ES2020', '--module', 'commonjs', '--skipLibCheck', '--strict',
@@ -40,7 +40,7 @@ test('route cooldown waits for connectivity without accepting duplicate inferenc
 test('restart capacity rejections wait and retain one unchanged prompt until setup succeeds', async t => {
   const bodies = []; const phases = [];
   t.mock.method(global, 'fetch', async (url, options) => {
-    assert.equal(url, '/swarm/api/v1/chat/completions');
+    assert.equal(url, '/peerfoundry/api/v1/chat/completions');
     bodies.push(options.body);
     return bodies.length < 3 ? waiting() : Response.json(answer);
   });

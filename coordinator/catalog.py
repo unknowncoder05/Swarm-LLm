@@ -9,7 +9,7 @@ _RPC_MODELS: dict[str, float] = {
 }
 
 _RPC_DEFAULT_CONTEXT = {"qwen3:30b-a3b": 32768, "qwen3.8:27b-q4_K_M": 32768,
-                        "devstral-small-2:24b": 16384}
+                        "devstral-small-2:24b": 32768}
 
 # Prefer Ollama on a sufficiently large single GPU; otherwise form a native pair.
 RPC_FALLBACK_MODELS = {"devstral-small-2:24b": 17.0}

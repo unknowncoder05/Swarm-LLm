@@ -15,19 +15,19 @@ def command(kind, args):
         for option in ("-ngl", "--gpu-layers", "--n-gpu-layers"):
             if option in args:
                 args[args.index(option) + 1] = "auto"
-        return ["/opt/swarm/llama.cpp/build/bin/llama-server"] + args + [
+        return ["/opt/peerfoundry/llama.cpp/build/bin/llama-server"] + args + [
             "--load-mode", "mmap", "--parallel", "1", "--flash-attn", "on",
             "--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "--predict", "256",
             "--batch-size", "128", "--ubatch-size", "64",
             "--fit", "on", "--fit-target", "512", "-lv", "4",
             "--jinja",
         ]
-    return ["/opt/swarm/llama.cpp/build/bin/ggml-rpc-server", "--cache"] + args
+    return ["/opt/peerfoundry/llama.cpp/build/bin/ggml-rpc-server", "--cache"] + args
 
 
 def main():
     kind = Path(sys.argv[0]).name
-    log_path = "/var/log/swarm-llama.log" if kind == "llama-server" else "/var/log/swarm-rpc.log"
+    log_path = "/var/log/peerfoundry-llama.log" if kind == "llama-server" else "/var/log/swarm-rpc.log"
     fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     os.dup2(fd, 1)
     os.dup2(fd, 2)

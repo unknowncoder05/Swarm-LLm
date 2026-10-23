@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review or apply the Swarm public-proxy timeout needed for cold RPC loads."""
+"""Review or apply the PeerFoundry public-proxy timeout needed for cold RPC loads."""
 import argparse
 from datetime import datetime, timezone
 import difflib
@@ -12,13 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def update_timeout(source):
-    blocks = list(re.finditer(r"location\s+\^~\s+/swarm/\s*\{[^{}]*\}", source))
+    blocks = list(re.finditer(r"location\s+\^~\s+/peerfoundry/\s*\{[^{}]*\}", source))
     if len(blocks) != 1:
-        raise ValueError("Expected one flat location ^~ /swarm/ block")
+        raise ValueError("Expected one flat location ^~ /peerfoundry/ block")
     block = blocks[0]
     updated, count = re.subn(r"(proxy_read_timeout\s+)(?:180|3660)s\s*;", r"\g<1>3660s;", block[0])
     if count != 1:
-        raise ValueError("Expected exactly one known Swarm timeout (180s or 3660s)")
+        raise ValueError("Expected exactly one known PeerFoundry timeout (180s or 3660s)")
     return source[:block.start()] + updated + source[block.end():]
 
 
@@ -50,7 +50,7 @@ def main():
         subprocess.run(["sudo", "-n", "nginx", "-t"], check=True)
         subprocess.run(["sudo", "-n", "nginx", "-s", "reload"], check=True)
         raise
-    print(f"Applied Swarm timeout 3660s; backup: {backup}")
+    print(f"Applied PeerFoundry timeout 3660s; backup: {backup}")
 
 
 if __name__ == "__main__":

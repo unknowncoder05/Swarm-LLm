@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Sets up Ollama + a coding LLM on a Windows machine and registers
-    it with a swarm-llm coordinator.
+    it with a peerfoundry coordinator.
 
 .EXAMPLE
     # Interactive wizard (recommended  -  auto-detects hardware, shows model menu):
@@ -200,7 +200,7 @@ function Show-Banner {
     Write-Host "  #######|+###+###++##|  ##|##|  ##|##| +=+ ##|    #######+#######+##| +=+ ##|" -ForegroundColor Cyan
     Write-Host "  +======+ +==++==+ +=+  +=++=+  +=++=+     +=+    +======++======++=+     +=+" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  swarm-llm Agent  |  TLS ON  |  API Key Auth ON" -ForegroundColor DarkCyan
+    Write-Host "  PeerFoundry Agent  |  TLS ON  |  API Key Auth ON" -ForegroundColor DarkCyan
     Write-Host ""
 }
 

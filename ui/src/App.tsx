@@ -10,7 +10,7 @@ import { requestChatCompletion, type ChatPhase } from "./chat-request";
 import { deploymentUrls } from "./deployment";
 
 const POLL_MS = 3000;
-const LS_KEY  = "swarm_admin_key";
+const LS_KEY  = "peerfoundry_admin_key";
 
 function useLocalStorage<T>(key: string, init: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
@@ -24,7 +24,7 @@ function useLocalStorage<T>(key: string, init: T): [T, React.Dispatch<React.SetS
 }
 
 function apiFetch(path: string, key: string) {
-  return fetch(`/swarm/api${path}`, { headers: { "X-API-Key": key } });
+  return fetch(`/peerfoundry/api${path}`, { headers: { "X-API-Key": key } });
 }
 
 // ── login screen ──────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ function JoinCard() {
           Connect a machine
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)" }}>
-          Run on any machine with a GPU to join the swarm
+          Run on any machine with a GPU to join the peerfoundry
         </div>
       </div>
 
@@ -165,7 +165,7 @@ function LoginScreen({ onLogin }: { onLogin: (key: string) => void }) {
     try {
       const res = await apiFetch("/machines", key.trim());
       if (res.ok) {
-        localStorage.setItem(LS_KEY, key.trim());
+        sessionStorage.setItem(LS_KEY, key.trim());
         onLogin(key.trim());
       } else {
         setError("Invalid key — try again.");
@@ -196,7 +196,7 @@ function LoginScreen({ onLogin }: { onLogin: (key: string) => void }) {
             background: "linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
           }}>
-            swarm-llm
+            PeerFoundry
           </h1>
           <p style={{ color: "var(--muted)", fontSize: 13 }}>
             control plane&nbsp;&nbsp;·&nbsp;&nbsp;
@@ -639,9 +639,9 @@ function ModelPicker({ model, setModel, liveModels }: {
 }
 
 function Chat({ apiKey }: { apiKey: string }) {
-  const [messages, setMessages] = useLocalStorage<ChatMessage[]>("swarm_chat_messages", []);
+  const [messages, setMessages] = useLocalStorage<ChatMessage[]>("peerfoundry_chat_messages", []);
   const [input, setInput]       = useState("");
-  const [model, setModel]       = useLocalStorage<string>("swarm_chat_model", "");
+  const [model, setModel]       = useLocalStorage<string>("peerfoundry_chat_model", "");
   const [liveModels, setLiveModels] = useState<string[]>([]);
   const [customModel, setCustomModel] = useState("");
   const [showCustom, setShowCustom]   = useState(false);
@@ -655,7 +655,7 @@ function Chat({ apiKey }: { apiKey: string }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadModels = useCallback(() => {
-    fetch("/swarm/api/v1/models", { headers: { "X-API-Key": apiKey } })
+    fetch("/peerfoundry/api/v1/models", { headers: { "X-API-Key": apiKey } })
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(data => {
         const ids: string[] = data.data?.map((m: { id: string }) => m.id) ?? [];
@@ -799,7 +799,7 @@ function Chat({ apiKey }: { apiKey: string }) {
         {messages.length === 0 && !busy && (
           <div style={{ textAlign: "center", color: "var(--muted)", marginTop: 60 }}>
             <div style={{ fontSize: 36, marginBottom: 10 }}>⌨</div>
-            <div style={{ fontSize: 15, fontWeight: 500 }}>Ask the swarm anything</div>
+            <div style={{ fontSize: 15, fontWeight: 500 }}>Ask the peerfoundry anything</div>
             {model
               ? <div style={{ fontSize: 12, marginTop: 6 }}>
                   Running on{" "}
@@ -915,7 +915,7 @@ function Chat({ apiKey }: { apiKey: string }) {
             t.style.height = "auto";
             t.style.height = Math.min(t.scrollHeight, 120) + "px";
           }}
-          placeholder="Message the swarm… (Enter to send, Shift+Enter for newline)"
+          placeholder="Message the peerfoundry… (Enter to send, Shift+Enter for newline)"
           rows={1}
           style={{
             flex: 1, background: "rgba(255,255,255,0.05)",
@@ -1526,11 +1526,11 @@ function ImageGen({ apiKey }: { apiKey: string }) {
   const [size, setSize]       = useState("1024x1024");
   const [busy, setBusy]       = useState(false);
   const [error, setError]     = useState("");
-  const [jobs, setJobs]       = useLocalStorage<ImageGenJob[]>("swarm_image_jobs", []);
+  const [jobs, setJobs]       = useLocalStorage<ImageGenJob[]>("peerfoundry_image_jobs", []);
   const [catalog, setCatalog] = useState<MediaModel[]>([]);
 
   useEffect(() => {
-    fetch("/swarm/api/v1/images/models", { headers: { "X-API-Key": apiKey } })
+    fetch("/peerfoundry/api/v1/images/models", { headers: { "X-API-Key": apiKey } })
       .then(r => r.json()).then(d => setCatalog(d.data ?? [])).catch(() => {});
   }, [apiKey]);
 
@@ -1562,7 +1562,7 @@ function ImageGen({ apiKey }: { apiKey: string }) {
       ...prev,
     ]);
     try {
-      const res = await fetch("/swarm/api/v1/images/generations", {
+      const res = await fetch("/peerfoundry/api/v1/images/generations", {
         method: "POST",
         headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({ model, prompt: prompt.trim(), negative_prompt: neg, n: 1, size }),
@@ -1715,12 +1715,12 @@ function VideoGen({ apiKey }: { apiKey: string }) {
   const [size, setSize]           = useState("512x512");
   const [busy, setBusy]           = useState(false);
   const [error, setError]         = useState("");
-  const [videos, setVideos]       = useLocalStorage<VideoGenResponse[]>("swarm_video_jobs", []);
+  const [videos, setVideos]       = useLocalStorage<VideoGenResponse[]>("peerfoundry_video_jobs", []);
   const [catalog, setCatalog]     = useState<MediaModel[]>([]);
   const pollRefs = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    fetch("/swarm/api/v1/video/models", { headers: { "X-API-Key": apiKey } })
+    fetch("/peerfoundry/api/v1/video/models", { headers: { "X-API-Key": apiKey } })
       .then(r => r.json()).then(d => setCatalog(d.data ?? [])).catch(() => {});
   }, [apiKey]);
 
@@ -1746,7 +1746,7 @@ function VideoGen({ apiKey }: { apiKey: string }) {
     if (pollRefs.current[id]) return;
     pollRefs.current[id] = window.setInterval(async () => {
       try {
-        const res = await fetch(`/swarm/api/v1/video/generations/${id}`, {
+        const res = await fetch(`/peerfoundry/api/v1/video/generations/${id}`, {
           headers: { "X-API-Key": apiKey },
         });
         if (res.status === 404) {
@@ -1774,7 +1774,7 @@ function VideoGen({ apiKey }: { apiKey: string }) {
     setBusy(true); setError("");
     const [w, h] = size.split("x").map(Number);
     try {
-      const res = await fetch("/swarm/api/v1/video/generations", {
+      const res = await fetch("/peerfoundry/api/v1/video/generations", {
         method: "POST",
         headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({ model, prompt: prompt.trim(), negative_prompt: neg,
@@ -2202,7 +2202,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
           background: "linear-gradient(135deg, #a78bfa 0%, #22d3ee 100%)",
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
         }}>
-          swarm-llm
+          PeerFoundry
         </h1>
         <span style={{
           color: "var(--muted)", fontSize: 11, fontWeight: 500,
@@ -2324,7 +2324,7 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
                     color: "var(--muted)", padding: "48px 0", fontSize: 13 }}>
                     No agents connected yet. Run{" "}
                     <code style={{ fontFamily: "var(--mono)", color: "var(--accent)" }}>agent.ps1</code>
-                    {" "}on a Windows machine to join the swarm.
+                    {" "}on a Windows machine to join the peerfoundry.
                   </td></tr>
                 )
               }
@@ -2343,11 +2343,16 @@ function Dashboard({ apiKey, onLogout }: { apiKey: string; onLogout: () => void 
 
 export default function App() {
   const [apiKey, setApiKey] = useState<string | null>(
-    () => localStorage.getItem(LS_KEY)
+    () => {
+      // Remove persistent credentials left by earlier dashboard versions.
+      localStorage.removeItem("swarm_admin_key");
+      localStorage.removeItem(LS_KEY);
+      return sessionStorage.getItem(LS_KEY);
+    }
   );
 
   function handleLogout() {
-    localStorage.removeItem(LS_KEY);
+    sessionStorage.removeItem(LS_KEY);
     setApiKey(null);
   }
 

@@ -16,16 +16,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url")
-    parser.add_argument("--model", help="Swarm model ID; defaults to the selected OpenCode model")
+    parser.add_argument("--model", help="PeerFoundry model ID; defaults to the selected OpenCode model")
     parser.add_argument("--context", type=int, choices=range(512, 32769), metavar="512..32768",
                         help="Context tokens; defaults to the selected model's saved profile")
     parser.add_argument("--timeout", type=int, default=240)
     args = parser.parse_args()
     config = json.loads((ROOT / "opencode.json").read_text())
-    model = args.model or config.get("model", "swarm-llm/qwen3:30b-a3b").split("/", 1)[-1]
-    profile = config["provider"]["swarm-llm"].get("models", {}).get(model, {})
+    model = args.model or config.get("model", "peerfoundry/qwen3:30b-a3b").split("/", 1)[-1]
+    profile = config["provider"]["peerfoundry"].get("models", {}).get(model, {})
     context = args.context or profile.get("limit", {}).get("context", 4096)
-    base = args.base_url or config["provider"]["swarm-llm"]["options"]["baseURL"]
+    base = args.base_url or config["provider"]["peerfoundry"]["options"]["baseURL"]
     if base == BASE_URL_ENV:
         base = load_base_url(ROOT)
     key = load_consumer_key(ROOT)

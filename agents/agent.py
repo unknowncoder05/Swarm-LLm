@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swarm-llm Agent  -  Python version
+PeerFoundry Agent  -  Python version
 Works on Windows, Linux, macOS wherever Python 3.8+ is available.
 
 Usage (non-interactive):
@@ -274,8 +274,10 @@ def _apply_update(new_code: str) -> None:
     except Exception:
         if platform.system() == "Windows" and _is_supervised():
             raise RuntimeError("Cannot update the supervised agent's durable script")
-        tmp = Path(_tf.mktemp(suffix="_swarm_agent.py"))
-        tmp.write_text(new_code, encoding="utf-8")
+        fd, temporary = _tf.mkstemp(suffix="_peerfoundry_agent.py")
+        tmp = Path(temporary)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(new_code)
         target = tmp
     print(_c("\033[33m", f"  [update] restarting as {target}..."))
     if platform.system() != "Windows":
@@ -342,7 +344,7 @@ def write_status(phase, detail=""):
 def show_banner():
     print()
     print(_c(CYAN, "  +-------------------------------------------------------+"))
-    print(_c(CYAN, "  |         swarm-llm Agent  -  Python Edition            |"))
+    print(_c(CYAN, "  |         PeerFoundry Agent  -  Python Edition            |"))
     print(_c(CYAN, "  |         TLS ON  |  API Key Auth ON                    |"))
     print(_c(CYAN, "  +-------------------------------------------------------+"))
     print()
@@ -666,7 +668,7 @@ def install_llamacpp():
     else:
         req = Request(
             f"https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/{_LLAMACPP_RELEASE}",
-            headers={"User-Agent": "swarm-llm-agent"},
+            headers={"User-Agent": "peerfoundry-agent"},
         )
         try:
             with urlopen(req, timeout=20) as resp:
@@ -1055,7 +1057,7 @@ def _start_rpc_quic_tunnel(assignment, coordinator, api_key, native_port=None):
             raise RuntimeError("QUIC transport module checksum mismatch")
         temporary = helper.with_suffix(".tmp")
         temporary.write_bytes(data); temporary.replace(helper)
-    spec = importlib.util.spec_from_file_location("swarm_quic_" + _QUIC_MODULE_SHA256, helper)
+    spec = importlib.util.spec_from_file_location("peerfoundry_quic_" + _QUIC_MODULE_SHA256, helper)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     def control(payload):
         response = requests.post(coordinator.rstrip("/") + "/agent/rpc/quic/endpoint", json=payload,
@@ -1692,13 +1694,13 @@ def _rpc_infer_with_health(body, port, assignment, coordinator, api_key, emit=No
         current = _rpc_poll_assignment(coordinator, api_key)
         if not current or current.get("dissolve") or current["cluster_id"] != assignment["cluster_id"]:
             raise RuntimeError("RPC route was withdrawn; stopping native inference")
-        if emit is not None and _chat_claim[0]:
+        if _chat_claim[0]:
             response = requests.get(coordinator.rstrip("/") + "/agent/jobs/" + _chat_claim[0] + "/cancelled",
                                     headers={"X-API-Key": api_key}, timeout=5)
             response.raise_for_status()
             if response.json().get("cancelled"):
                 # Return to the role owner, which tears down the native process.
-                raise RpcStreamCancelled("Consumer cancelled native streaming inference")
+                raise RpcStreamCancelled("Consumer cancelled native inference")
     success, result = output[0]
     if not success:
         raise result
@@ -1929,6 +1931,13 @@ def _rpc_thread_func(coordinator, api_key):
     step("[rpc] Polling for RPC assignments...")
     while True:
         assignment = _rpc_poll_assignment(coordinator, api_key)
+        if assignment and assignment.get("dissolve"):
+            _post_agent_receipt(f"{coordinator}/agent/rpc/done", api_key,
+                payload={"agent_id": _agent_id, "cluster_id": assignment["cluster_id"],
+                         "role": assignment.get("role")},
+                label=f"RPC teardown for {assignment['cluster_id']}")
+            time.sleep(1)
+            continue
         if assignment and not assignment.get("dissolve"):
             role = assignment.get("role")
             cid  = assignment.get("cluster_id", "")[:8]
@@ -3483,7 +3492,7 @@ def main():
     global _coordinator, _api_key, _model, _agent_id, _hw
     global _ollama_proc, _ollama_port, _ollama_exe
 
-    parser = argparse.ArgumentParser(description="swarm-llm agent")
+    parser = argparse.ArgumentParser(description="peerfoundry agent")
     parser.add_argument("--coordinator",     default="")
     parser.add_argument("--api-key",         default="")
     parser.add_argument("--model",           default="",

@@ -32,7 +32,7 @@ Assert-PrivateIPv4 $PrimaryAddress
 Assert-PrivateIPv4 $WorkerAddress
 if ($PrimaryAddress -eq $WorkerAddress) { throw "Primary and worker addresses must differ" }
 
-$ruleName = "SwarmLLM-RPC-$RpcPort-from-$PrimaryAddress"
+$ruleName = "PeerFoundry-RPC-$RpcPort-from-$PrimaryAddress"
 $existing = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
 if ($existing) { $existing | Remove-NetFirewallRule }
 if ($Remove) {
@@ -41,7 +41,7 @@ if ($Remove) {
 }
 
 New-NetFirewallRule -Name $ruleName `
-    -DisplayName "Swarm LLM RPC $RpcPort from $PrimaryAddress" `
+    -DisplayName "PeerFoundry RPC $RpcPort from $PrimaryAddress" `
     -Direction Inbound -Action Allow -Protocol TCP -Enabled True `
     -LocalAddress $WorkerAddress -LocalPort $RpcPort `
     -RemoteAddress $PrimaryAddress -Profile Any | Out-Null

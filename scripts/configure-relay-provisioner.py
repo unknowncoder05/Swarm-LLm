@@ -18,7 +18,7 @@ def main():
     if not ipaddress.ip_address(args.bind).is_private or args.bind in ("0.0.0.0", "127.0.0.1"):
         parser.error("Use the host-only Docker gateway, not a public or wildcard address")
     unit = f"""[Unit]
-Description=Terraform lifecycle for the on-demand Swarm relay
+Description=Terraform lifecycle for the on-demand PeerFoundry relay
 After=network-online.target docker.service
 Wants=network-online.target
 [Service]
@@ -57,7 +57,7 @@ WantedBy=multi-user.target
     os.replace(temporary, path)
     state = ROOT / ".rpc-trial/relay-provisioner"
     state.mkdir(parents=True, exist_ok=True)
-    unit_path = state / "swarm-relay-provisioner.service"
+    unit_path = state / "peerfoundry-relay-provisioner.service"
     unit_path.write_text(unit)
     print(f"Private settings written; install and start the unit at {unit_path}")
 

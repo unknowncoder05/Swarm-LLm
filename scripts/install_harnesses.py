@@ -1,6 +1,6 @@
 """
-Install swarm-goose and swarm-aider wrappers into ~/.local/bin/.
-Run once from the swarm-llm repo; after that both commands work from any directory.
+Install peerfoundry-goose and peerfoundry-aider wrappers into ~/.local/bin/.
+Run once from the peerfoundry repo; after that both commands work from any directory.
 """
 import os, shutil, stat, subprocess, sys, textwrap
 from gen_opencode_config import load_base_url
@@ -22,20 +22,20 @@ if not key:
     print("ERROR: CONSUMER_KEY missing from .env", file=sys.stderr)
     sys.exit(1)
 
-SWARM_URL = load_base_url()
+PEERFOUNDRY_URL = load_base_url()
 
-# ── write ~/.config/swarm-llm/config ─────────────────────────────────────────
-cfg_dir = os.path.expanduser("~/.config/swarm-llm")
+# ── write ~/.config/peerfoundry/config ─────────────────────────────────────────
+cfg_dir = os.path.expanduser("~/.config/peerfoundry")
 os.makedirs(cfg_dir, exist_ok=True)
 cfg_path = os.path.join(cfg_dir, "config")
 with open(cfg_path, "w") as f:
-    f.write(f"SWARM_URL={SWARM_URL}\nSWARM_KEY={key}\n")
+    f.write(f"PEERFOUNDRY_URL={PEERFOUNDRY_URL}\nPEERFOUNDRY_KEY={key}\n")
 os.chmod(cfg_path, 0o600)
 
 # ── shared model picker (embedded in each wrapper) ────────────────────────────
 PICK_MODEL_FUNC = r"""
 _pick_model() {
-  python3 - "$SWARM_URL" "$SWARM_KEY" "$1" <<'PYEOF'
+  python3 - "$PEERFOUNDRY_URL" "$PEERFOUNDRY_KEY" "$1" <<'PYEOF'
 import sys, json, urllib.request
 
 url, key, preselect = sys.argv[1] + "/models", sys.argv[2], sys.argv[3]
@@ -115,51 +115,51 @@ CODE_QUALITY: Minimal changes. Clean code. Understand the codebase before changi
 WORKFLOW: 1. Explore to understand context. 2. Execute immediately using tools — write files, run commands. 3. Verify by running tests or checking output. Complete the full task autonomously without stopping to ask for confirmation."
 """
 
-# ── swarm-goose wrapper ───────────────────────────────────────────────────────
+# ── peerfoundry-goose wrapper ───────────────────────────────────────────────────────
 GOOSE_WRAPPER = f"""#!/usr/bin/env bash
-# swarm-goose — launch an interactive Goose session against the swarm
+# peerfoundry-goose — launch an interactive Goose session against the peerfoundry
 # Works from any directory. Use -m MODEL to skip the model picker.
 set -euo pipefail
 
-source "${{HOME}}/.config/swarm-llm/config"
+source "${{HOME}}/.config/peerfoundry/config"
 {PICK_MODEL_FUNC}
 {PARSE_MODEL_FLAG}
 # Mistral's official system prompt — devstral was fine-tuned on this exact text.
 # Passing it via --system realigns the model with its agentic training.
 {DEVSTRAL_SYSTEM}
-# swarm-goose "do a task"   → one-shot (no TUI)
-# swarm-goose               → interactive session (with model picker)
+# peerfoundry-goose "do a task"   → one-shot (no TUI)
+# peerfoundry-goose               → interactive session (with model picker)
 if [[ $# -gt 0 && "$1" != --* ]]; then
   TASK="$*"
   exec env \\
-    OPENAI_BASE_URL="$SWARM_URL" \\
-    OPENAI_API_KEY="$SWARM_KEY" \\
+    OPENAI_BASE_URL="$PEERFOUNDRY_URL" \\
+    OPENAI_API_KEY="$PEERFOUNDRY_KEY" \\
     GOOSE_PROVIDER=openai \\
     GOOSE_MODEL="$MODEL" \\
     goose run --text "$TASK"
 else
   exec env \\
-    OPENAI_BASE_URL="$SWARM_URL" \\
-    OPENAI_API_KEY="$SWARM_KEY" \\
+    OPENAI_BASE_URL="$PEERFOUNDRY_URL" \\
+    OPENAI_API_KEY="$PEERFOUNDRY_KEY" \\
     GOOSE_PROVIDER=openai \\
     GOOSE_MODEL="$MODEL" \\
     goose session --system "$SYSTEM" "$@"
 fi
 """
 
-# ── swarm-aider wrapper ───────────────────────────────────────────────────────
+# ── peerfoundry-aider wrapper ───────────────────────────────────────────────────────
 AIDER_WRAPPER = f"""#!/usr/bin/env bash
-# swarm-aider — launch aider against the swarm with the right flags
+# peerfoundry-aider — launch aider against the peerfoundry with the right flags
 # Works from any directory. Use -m MODEL to skip the model picker.
 # Uses diff (SEARCH/REPLACE) edit format — works reliably with devstral/qwen3.
 set -euo pipefail
 
-source "${{HOME}}/.config/swarm-llm/config"
+source "${{HOME}}/.config/peerfoundry/config"
 {PICK_MODEL_FUNC}
 {PARSE_MODEL_FLAG}
 exec uvx --from aider-chat aider \\
-  --openai-api-base "$SWARM_URL" \\
-  --openai-api-key "$SWARM_KEY" \\
+  --openai-api-base "$PEERFOUNDRY_URL" \\
+  --openai-api-key "$PEERFOUNDRY_KEY" \\
   --model "openai/$MODEL" \\
   --edit-format diff \\
   --yes \\
@@ -172,8 +172,8 @@ bin_dir = os.path.expanduser("~/.local/bin")
 os.makedirs(bin_dir, exist_ok=True)
 
 wrappers = {
-    "swarm-goose": GOOSE_WRAPPER,
-    "swarm-aider": AIDER_WRAPPER,
+    "peerfoundry-goose": GOOSE_WRAPPER,
+    "peerfoundry-aider": AIDER_WRAPPER,
 }
 
 for name, content in wrappers.items():
@@ -190,7 +190,7 @@ if os.path.expanduser("~/.local/bin") not in path_env.split(":"):
     rc = "~/.zshrc" if "zsh" in shell else "~/.bashrc"
     rc_path = os.path.expanduser(rc)
     with open(rc_path, "a") as f:
-        f.write(f'\nexport PATH="$HOME/.local/bin:$PATH"  # added by swarm-llm\n')
+        f.write(f'\nexport PATH="$HOME/.local/bin:$PATH"  # added by peerfoundry\n')
     print(f"\n  PATH updated in {rc} — run: source {rc}")
 else:
     print(f"\n  ~/.local/bin already on PATH")
@@ -210,7 +210,7 @@ else:
 
 # ── ensure uvx is available (for aider) ──────────────────────────────────────
 if not shutil.which("uvx"):
-    print("\n  uvx not found — installing uv (required for swarm-aider)...")
+    print("\n  uvx not found — installing uv (required for peerfoundry-aider)...")
     subprocess.run("curl -LsSf https://astral.sh/uv/install.sh | sh", shell=True, check=True)
     print("  uv installed")
 else:
@@ -219,12 +219,12 @@ else:
 print(f"""
   Done. Commands available from any directory:
 
-    swarm-goose              interactive Goose session — shows model picker
-    swarm-goose -m MODEL     skip picker, use specific model
-    swarm-goose "a task"     one-shot (no TUI)
-    swarm-aider              aider with SEARCH/REPLACE edits — shows model picker
-    swarm-aider -m MODEL     skip picker, use specific model
-    swarm-aider file.py      open specific files in aider
+    peerfoundry-goose              interactive Goose session — shows model picker
+    peerfoundry-goose -m MODEL     skip picker, use specific model
+    peerfoundry-goose "a task"     one-shot (no TUI)
+    peerfoundry-aider              aider with SEARCH/REPLACE edits — shows model picker
+    peerfoundry-aider -m MODEL     skip picker, use specific model
+    peerfoundry-aider file.py      open specific files in aider
 
-  Config: ~/.config/swarm-llm/config  (API key lives here)
+  Config: ~/.config/peerfoundry/config  (API key lives here)
 """)

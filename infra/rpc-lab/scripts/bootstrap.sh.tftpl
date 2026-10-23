@@ -3,31 +3,31 @@ set -euo pipefail
 umask 077
 # cloud-init's root process may omit HOME; Ollama needs the user's real home.
 export HOME=/root
-exec > >(tee -a /var/log/swarm-bootstrap.log) 2>&1
+exec > >(tee -a /var/log/peerfoundry-bootstrap.log) 2>&1
 
 # Arm before downloading or compiling, so a failed bootstrap also has a limit.
-cat >/etc/systemd/system/swarm-expire.service <<'UNIT'
+cat >/etc/systemd/system/peerfoundry-expire.service <<'UNIT'
 [Unit]
-Description=Terminate disposable Swarm lab instance
+Description=Terminate disposable PeerFoundry lab instance
 [Service]
 Type=oneshot
 ExecStart=/usr/sbin/shutdown -h now
 UNIT
-cat >/etc/systemd/system/swarm-expire.timer <<'UNIT'
+cat >/etc/systemd/system/peerfoundry-expire.timer <<'UNIT'
 [Unit]
-Description=Disposable Swarm lab run-time limit
+Description=Disposable PeerFoundry lab run-time limit
 [Timer]
 OnBootSec=${runtime_seconds}s
-Unit=swarm-expire.service
+Unit=peerfoundry-expire.service
 [Install]
 WantedBy=timers.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now swarm-expire.timer
+systemctl enable --now peerfoundry-expire.timer
 
-mkdir -p /opt/swarm/schemas /data /run/swarm
-echo '${config_b64}' | base64 --decode >/opt/swarm/config.json
-config() { python3 -c 'import json,sys; print(json.load(open("/opt/swarm/config.json"))[sys.argv[1]])' "$1"; }
+mkdir -p /opt/peerfoundry/schemas /data /run/peerfoundry
+echo '${config_b64}' | base64 --decode >/opt/peerfoundry/config.json
+config() { python3 -c 'import json,sys; print(json.load(open("/opt/peerfoundry/config.json"))[sys.argv[1]])' "$1"; }
 role=$(config role)
 region=$(config region)
 hostnamectl set-hostname "$(config hostname)"
@@ -44,26 +44,26 @@ fi
 
 # The explicit manifest needs only GetObject; no bucket listing permission.
 for artifact in $(config artifacts); do
-  mkdir -p "/opt/swarm/$(dirname "$artifact")"
-  aws s3 cp "s3://$(config bucket)/$(config revision)/$artifact" "/opt/swarm/$artifact" --region "$region" --only-show-errors
+  mkdir -p "/opt/peerfoundry/$(dirname "$artifact")"
+  aws s3 cp "s3://$(config bucket)/$(config revision)/$artifact" "/opt/peerfoundry/$artifact" --region "$region" --only-show-errors
 done
-chmod 755 /opt/swarm/llama-wrapper.py
-python3 -m venv /opt/swarm/venv
-/opt/swarm/venv/bin/pip install --disable-pip-version-check -r /opt/swarm/requirements.txt requests==2.32.5 psutil==7.0.0
+chmod 755 /opt/peerfoundry/llama-wrapper.py
+python3 -m venv /opt/peerfoundry/venv
+/opt/peerfoundry/venv/bin/pip install --disable-pip-version-check -r /opt/peerfoundry/requirements.txt requests==2.32.5 psutil==7.0.0
 
 if [ "$role" = gpu ]; then
   # A small swap reserve protects against transient build/model host allocations.
-  fallocate -l 8G /opt/swarm/swapfile
-  chmod 600 /opt/swarm/swapfile
-  mkswap /opt/swarm/swapfile
-  swapon /opt/swarm/swapfile
+  fallocate -l 8G /opt/peerfoundry/swapfile
+  chmod 600 /opt/peerfoundry/swapfile
+  mkswap /opt/peerfoundry/swapfile
+  swapon /opt/peerfoundry/swapfile
   apt-get install -y -q build-essential cmake ninja-build git libssl-dev
   if [ "$(config trial_size)" = small ]; then
     # Fractional G6f requires AWS GRID, not the DLAMI's Tesla driver. Keep the
     # running kernel; compiling its matching headers avoids a bootstrap reboot.
     apt-get install -y -q gcc-12 g++-12 "linux-headers-$(uname -r)"
     export CC=gcc-12 CXX=g++-12
-    printf 'blacklist nouveau\noptions nouveau modeset=0\n' >/etc/modprobe.d/swarm-nouveau.conf
+    printf 'blacklist nouveau\noptions nouveau modeset=0\n' >/etc/modprobe.d/peerfoundry-nouveau.conf
     modprobe -r nouveau || true
     aws s3 cp "s3://ec2-linux-nvidia-drivers/$(config grid_driver_key)" /tmp/nvidia-grid.run --region us-east-1 --only-show-errors
     sh /tmp/nvidia-grid.run --silent --no-questions --no-opengl-files --no-cc-version-check
@@ -84,48 +84,48 @@ if [ "$role" = gpu ]; then
   # Isolate Ollama's helper lookup from this lab's separate llama-server wrapper.
   # Prove the downloader starts before spending time compiling llama.cpp.
   version=$(config ollama_version)
-  mkdir -p /opt/swarm/ollama
+  mkdir -p /opt/peerfoundry/ollama
   curl -fL --retry 5 "https://github.com/ollama/ollama/releases/download/$version/ollama-linux-amd64.tar.zst" -o /tmp/ollama.tar.zst
-  tar --zstd -xf /tmp/ollama.tar.zst -C /opt/swarm/ollama
+  tar --zstd -xf /tmp/ollama.tar.zst -C /opt/peerfoundry/ollama
   rm -f /tmp/ollama.tar.zst
-  ln -sf /opt/swarm/ollama/bin/ollama /usr/local/bin/ollama
-  /opt/swarm/ollama/bin/ollama --version
+  ln -sf /opt/peerfoundry/ollama/bin/ollama /usr/local/bin/ollama
+  /opt/peerfoundry/ollama/bin/ollama --version
   export OLLAMA_HOST=127.0.0.1:11434
   export OLLAMA_MODELS=/root/.ollama/models
-  /opt/swarm/ollama/bin/ollama serve >/var/log/swarm-ollama-prepare.log 2>&1 &
+  /opt/peerfoundry/ollama/bin/ollama serve >/var/log/peerfoundry-ollama-prepare.log 2>&1 &
   ollama_pid=$!
   trap 'kill "$ollama_pid" 2>/dev/null || true' EXIT
   ready=0
   for attempt in $(seq 1 60); do
     if ! kill -0 "$ollama_pid" 2>/dev/null; then
-      tail -80 /var/log/swarm-ollama-prepare.log
+      tail -80 /var/log/peerfoundry-ollama-prepare.log
       exit 1
     fi
     if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then ready=1; break; fi
     sleep 2
   done
-  if [ "$ready" != 1 ]; then tail -80 /var/log/swarm-ollama-prepare.log; exit 1; fi
-  /opt/swarm/ollama/bin/ollama pull "$(config model)"
+  if [ "$ready" != 1 ]; then tail -80 /var/log/peerfoundry-ollama-prepare.log; exit 1; fi
+  /opt/peerfoundry/ollama/bin/ollama pull "$(config model)"
   kill "$ollama_pid"
   wait "$ollama_pid" || true
   trap - EXIT
 
-  git init /opt/swarm/llama.cpp
-  git -C /opt/swarm/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
-  git -C /opt/swarm/llama.cpp fetch --depth 1 origin "$(config llama_cpp_ref)"
-  git -C /opt/swarm/llama.cpp checkout --detach FETCH_HEAD
-  cmake -S /opt/swarm/llama.cpp -B /opt/swarm/llama.cpp/build -G Ninja \
+  git init /opt/peerfoundry/llama.cpp
+  git -C /opt/peerfoundry/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+  git -C /opt/peerfoundry/llama.cpp fetch --depth 1 origin "$(config llama_cpp_ref)"
+  git -C /opt/peerfoundry/llama.cpp checkout --detach FETCH_HEAD
+  cmake -S /opt/peerfoundry/llama.cpp -B /opt/peerfoundry/llama.cpp/build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON -DGGML_RPC=ON \
     -DCMAKE_CUDA_ARCHITECTURES="$(config cuda_arch)-real" -DGGML_CUDA_FA_QUANTS=q8_0-q8_0 \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
   # Two compile jobs keep peak memory modest on the 8 GiB RAM small nodes.
-  cmake --build /opt/swarm/llama.cpp/build --parallel 2 --target llama-server ggml-rpc-server
-  /opt/swarm/llama.cpp/build/bin/llama-server --list-devices 2>&1 | tee /var/log/swarm-devices.log
-  grep -q CUDA /var/log/swarm-devices.log
+  cmake --build /opt/peerfoundry/llama.cpp/build --parallel 2 --target llama-server ggml-rpc-server
+  /opt/peerfoundry/llama.cpp/build/bin/llama-server --list-devices 2>&1 | tee /var/log/peerfoundry-devices.log
+  grep -q CUDA /var/log/peerfoundry-devices.log
 
   # The application finds these wrappers; both execute the same pinned build.
-  ln -sf /opt/swarm/llama-wrapper.py /usr/local/bin/llama-server
-  ln -sf /opt/swarm/llama-wrapper.py /usr/local/bin/llama-rpc-server
+  ln -sf /opt/peerfoundry/llama-wrapper.py /usr/local/bin/llama-server
+  ln -sf /opt/peerfoundry/llama-wrapper.py /usr/local/bin/llama-rpc-server
 
   # Shape only private-subnet traffic; package downloads and SSM retain full speed.
   rate=$(config peer_network_mbps)
@@ -139,14 +139,14 @@ if [ "$role" = gpu ]; then
   fi
 fi
 
-cat >/etc/systemd/system/swarm-lab.service <<'UNIT'
+cat >/etc/systemd/system/peerfoundry-lab.service <<'UNIT'
 [Unit]
-Description=Swarm distributed inference experiment
+Description=PeerFoundry distributed inference experiment
 After=network-online.target
 Wants=network-online.target
 [Service]
-WorkingDirectory=/opt/swarm
-ExecStart=/opt/swarm/venv/bin/python /opt/swarm/launch.py
+WorkingDirectory=/opt/peerfoundry
+ExecStart=/opt/peerfoundry/venv/bin/python /opt/peerfoundry/launch.py
 Restart=on-failure
 RestartSec=10
 KillMode=control-group
@@ -158,5 +158,5 @@ Environment=GGML_RPC_NO_RDMA=1
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now swarm-lab.service
-echo "Swarm $role bootstrap complete; source revision $(config revision)"
+systemctl enable --now peerfoundry-lab.service
+echo "PeerFoundry $role bootstrap complete; source revision $(config revision)"

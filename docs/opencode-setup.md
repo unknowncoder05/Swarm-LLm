@@ -1,4 +1,4 @@
-# Set up OpenCode for Swarm
+# Set up OpenCode for PeerFoundry
 
 From a checkout of this repository, with Python 3 installed:
 
@@ -28,7 +28,7 @@ The 30B A3B profile retains its 32,768-token context and reasoning; rerunning se
 preserves a previously chosen smaller context unless `--context` is supplied.
 Existing providers,
 tools and permission settings are retained; existing provider filters are adjusted
-to allow `swarm-llm`. Malformed JSON and a competing `opencode.jsonc` stop setup
+to allow `peerfoundry`. Malformed JSON and a competing `opencode.jsonc` stop setup
 without replacing either file. Global OpenCode configuration is not written.
 
 This follows OpenCode's official [custom provider](https://opencode.ai/docs/providers/#custom-provider)
@@ -38,9 +38,9 @@ opened can override this checkout's custom profile.
 
 ## Choosing and running models
 
-1. Run setup, supply your Swarm API URL (including `/v1`) and consumer key, and
+1. Run setup, supply your PeerFoundry API URL (including `/v1`) and consumer key, and
    choose a model from the list.
-2. Start the launcher. In OpenCode type `/models` to see/select the Swarm models.
+2. Start the launcher. In OpenCode type `/models` to see/select the PeerFoundry models.
 3. Send your coding request. The first inference request triggers any missing
    model download and startup on eligible agents. For distributed models the
    coordinator chooses machines and checks connectivity before model startup.
@@ -50,7 +50,7 @@ OpenCode's [model picker](https://opencode.ai/docs/models/#select-a-model) uses
 the provider catalog saved by setup. Listing or selecting a model does not
 pre-download it. The advertised list includes models that can be loaded on
 demand; it does not mean they are all already loaded or can all run at once.
-GPU capacity can change between listing and sending a prompt. Swarm admission
+GPU capacity can change between listing and sending a prompt. PeerFoundry admission
 checks still apply, and the client never silently substitutes a smaller model.
 
 ### Qwen3 and Devstral on two 12 GB GPUs
@@ -71,7 +71,9 @@ python3 scripts/run-opencode.py
 These saved profiles target this pair and send matching `options.num_ctx` values;
 they are not architectural limits. Setup preserves saved per-model overrides.
 The generator's portable defaults remain smaller for deployments with less VRAM.
-A distributed Devstral API request without a context override starts a 16,384-token runtime.
+Without a context override, the coordinator selects a bounded context before
+placement using the prompt size, model policy and available workers. The saved
+OpenCode profiles above send their context explicitly.
 Small client windows can cause OpenCode to compact repeatedly before editing;
 the saved windows leave more room for its instructions and tool definitions.
 The 8K Qwen profiles reserve 1,024 output tokens, leaving about 7K for input.
@@ -133,7 +135,7 @@ instead, so retry after capacity is available.
 Check the live list without installing, changing config or starting inference:
 
 ```powershell
-py -3 scripts/setup-opencode.py --base-url https://your-host/swarm/api/v1 --list-models
+py -3 scripts/setup-opencode.py --base-url https://your-host/peerfoundry/api/v1 --list-models
 ```
 
 Refresh the saved picker by rerunning normal setup, then restart OpenCode.
@@ -160,7 +162,7 @@ vary; the live coding checks in this repository cover the 30B A3B profile.
 Downloads, cold model loading, prompt processing, and reasoning can make the first
 answer slow. Updated distributed RPC primaries now stream reasoning, text and tool
 deltas into OpenCode before the final answer. Older agents and the single-machine
-Ollama path retain the completed-response fallback. Check the Swarm dashboard for agent
+Ollama path retain the completed-response fallback. Check the PeerFoundry dashboard for agent
 download/startup phases and failures. Avoid repeatedly resubmitting while loading.
 Capacity failures may return HTTP 503; switching a large model does not evict an
 active cluster. On this deployment, unused RPC clusters unload after 900 seconds.
@@ -179,7 +181,7 @@ model without changing the 30B coding model or summary model:
 py -3 scripts/setup-opencode.py --title-model qwen3:14b
 ```
 
-This requires the title model to be advertised by Swarm. Its first request can
+This requires the title model to be advertised by PeerFoundry. Its first request can
 load it on an eligible spare agent. Use this only when that spare capacity is
 intended for background work. Setup leaves both the main model and `small_model`
 on 30B; only `agent.title.model` changes. Existing sessions need a client restart.
@@ -189,9 +191,9 @@ The option follows the pinned OpenCode implementation's
 
 ## Credentials
 
-Only a Swarm **consumer key** is needed. Setup and the launcher use this order:
+Only a PeerFoundry **consumer key** is needed. Setup and the launcher use this order:
 
-1. `SWARM_CONSUMER_KEY`, then `CONSUMER_KEY`, in the process environment.
+1. `PEERFOUNDRY_CONSUMER_KEY`, then `CONSUMER_KEY`, in the process environment.
 2. The checkout's `.env.opencode` (client-only settings).
 3. The checkout's `.env` (existing coordinator installations).
 
@@ -202,18 +204,18 @@ directory's inherited file permissions. Noninteractive setup requires a key
 already supplied through one of those sources. Do not copy coordinator admin or
 agent credentials to a client machine.
 
-Supply the URL with `--base-url` or `SWARM_BASE_URL`, or enter it at setup's prompt.
+Supply the URL with `--base-url` or `PEERFOUNDRY_BASE_URL`, or enter it at setup's prompt.
 The prompt offers the URL already saved in this checkout as a reusable default.
 Noninteractive setup requires one of those sources. The chosen URL is saved as
-`SWARM_BASE_URL` in ignored `.env.opencode`; existing private settings are retained.
+`PEERFOUNDRY_BASE_URL` in ignored `.env.opencode`; existing private settings are retained.
 Setup and the launcher resolve this variable from the environment, then
 `.env.opencode`, then `.env`. To change an existing credential, update its
 environment variable or private client file.
 
-Generated JSON contains `{env:SWARM_BASE_URL}` and `{env:SWARM_CONSUMER_KEY}`,
+Generated JSON contains `{env:PEERFOUNDRY_BASE_URL}` and `{env:PEERFOUNDRY_CONSUMER_KEY}`,
 keeping both deployment details outside the shared profile. Use the launcher so
 it loads these settings into OpenCode's child process. If you run `opencode`
-directly, export both `SWARM_BASE_URL` and `SWARM_CONSUMER_KEY` yourself.
+directly, export both `PEERFOUNDRY_BASE_URL` and `PEERFOUNDRY_CONSUMER_KEY` yourself.
 
 Authentication or connection failures stop setup. The check refuses redirects
 and accepts HTTPS endpoints, plus HTTP on loopback for local development.
@@ -234,11 +236,11 @@ python3 scripts/run-opencode.py /path/to/another/project
 For a different endpoint or an explicitly smaller context:
 
 ```sh
-python3 scripts/setup-opencode.py --base-url https://your-host/swarm/api/v1 --context 16384
+python3 scripts/setup-opencode.py --base-url https://your-host/peerfoundry/api/v1 --context 16384
 ```
 
-`--model` selects another Swarm API model name without prompting. The generator
-provides conservative context/tool profiles for the bounded Swarm catalog and
+`--model` selects another PeerFoundry API model name without prompting. The generator
+provides conservative context/tool profiles for the bounded PeerFoundry catalog and
 preserves existing overrides for other models. These are deployment limits,
 rather than the weights' architectural maximum context. `--context` tunes the
 30B A3B profile; it does not raise the server's limits for other models.
@@ -262,7 +264,7 @@ This override affects only the disposable trial, leaving the saved default intac
 
 ## Transport
 
-OpenCode always talks to Swarm through the same HTTPS OpenAI-compatible API.
+OpenCode always talks to PeerFoundry through the same HTTPS OpenAI-compatible API.
 It needs no QUIC plugin. The coordinator chooses the inter-agent model transport:
 direct LAN QUIC first, then eligible relay fallbacks after connectivity checks.
 Cloud relay use is currently disabled. See [direct QUIC](direct-quic-inference.md)

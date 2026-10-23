@@ -25,7 +25,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hosts", nargs=2, required=True)
     parser.add_argument("--profiles", nargs="+", choices=PROFILES, default=list(PROFILES))
-    parser.add_argument("--base-url", default="http://127.0.0.1:8081/swarm/api")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8081/peerfoundry/api")
     parser.add_argument("--wait-seconds", type=int, default=1200)
     parser.add_argument("--repeats", type=int, choices=range(1, 4), default=2)
     parser.add_argument("--apply", action="store_true", help="Run trials, restarting only the selected pair when idle")

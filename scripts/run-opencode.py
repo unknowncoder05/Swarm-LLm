@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch OpenCode with the Swarm credential without embedding it in config."""
+"""Launch OpenCode with the PeerFoundry credential without embedding it in config."""
 import os
 from pathlib import Path
 import shutil
@@ -31,10 +31,13 @@ def main():
     if not executable:
         raise SystemExit("Run python scripts/setup-opencode.py --install first")
     env = dict(os.environ)
-    env["SWARM_CONSUMER_KEY"] = load_consumer_key(ROOT, env)
-    env["SWARM_BASE_URL"] = load_base_url(ROOT, env)
-    if not env["SWARM_CONSUMER_KEY"]:
-        raise SystemExit("Run python scripts/setup-opencode.py to configure the Swarm consumer key")
+    env["PEERFOUNDRY_CONSUMER_KEY"] = load_consumer_key(ROOT, env)
+    env["PEERFOUNDRY_BASE_URL"] = load_base_url(ROOT, env)
+    # Existing external OpenCode configurations may still use the old placeholders.
+    env["SWARM_CONSUMER_KEY"] = env["PEERFOUNDRY_CONSUMER_KEY"]
+    env["SWARM_BASE_URL"] = env["PEERFOUNDRY_BASE_URL"]
+    if not env["PEERFOUNDRY_CONSUMER_KEY"]:
+        raise SystemExit("Run python scripts/setup-opencode.py to configure the PeerFoundry consumer key")
     env.setdefault("OPENCODE_CONFIG", str(ROOT / "opencode.json"))
     # OpenCode run resolves its default project from PWD, which subprocess
     # callers can inherit from a different directory than their actual cwd.

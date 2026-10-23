@@ -10,7 +10,7 @@ services:
       AGENT_KEY:    ${AGENT_KEY}
       CONSUMER_KEY: ${CONSUMER_KEY}
       DB_PATH:      /data/coordinator.db
-      AGENT_SOURCE_PATH: /opt/swarm/agent.py
+      AGENT_SOURCE_PATH: /opt/peerfoundry/agent.py
       RPC_RELAY_URL: ${RPC_RELAY_URL:-}
       RPC_RELAY_ADMIN_KEY: ${RPC_RELAY_ADMIN_KEY:-}
       RPC_RELAY_EXPIRES_AT: ${RPC_RELAY_EXPIRES_AT:-0}
@@ -23,15 +23,15 @@ services:
       RPC_IDLE_TIMEOUT_SEC: ${RPC_IDLE_TIMEOUT_SEC:-300}
     volumes:
       - coordinator-data:/data
-      - ./agents:/opt/swarm:ro
+      - ./agents:/opt/peerfoundry:ro
     expose:
       - "8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - swarm
+      - peerfoundry
 
-  # ── gateway: dashboard and API under /swarm on localhost:8081 ────────────
+  # ── gateway: dashboard and API under /peerfoundry on localhost:8081 ────────────
   # TLS may be terminated upstream by the deployment's reverse proxy.
   gateway:
     image: nginx:alpine
@@ -40,7 +40,7 @@ services:
       - "127.0.0.1:8081:8081"
     volumes:
       - ./nginx/gateway.conf:/etc/nginx/conf.d/gateway.conf:ro
-      - ./nginx/local.d:/etc/nginx/swarm-local:ro
+      - ./nginx/local.d:/etc/nginx/peerfoundry-local:ro
       - ./mirror:/srv/ollama:ro
       - ./agents:/srv/agent:ro
     extra_hosts:
@@ -49,7 +49,7 @@ services:
       - coordinator
       - ui
     networks:
-      - swarm
+      - peerfoundry
 
   # ── React dashboard ───────────────────────────────────────────────────────
   # Internal only; API requests retain the key supplied by the user.
@@ -62,10 +62,10 @@ services:
     depends_on:
       - coordinator
     networks:
-      - swarm
+      - peerfoundry
 
 networks:
-  swarm:
+  peerfoundry:
     driver: bridge
 
 volumes:

@@ -13,7 +13,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 GATE = """
     # BEGIN QUIC HANDOFF ADMISSION GATE
-    location = /swarm/api/v1/chat/completions { add_header Retry-After 5 always; return 503; }
+    location = /peerfoundry/api/v1/chat/completions { add_header Retry-After 5 always; return 503; }
     location = /api/v1/chat/completions { add_header Retry-After 5 always; return 503; }
     # END QUIC HANDOFF ADMISSION GATE
 """
@@ -28,7 +28,7 @@ def main():
         if "=" in line and not line.lstrip().startswith("#"):
             k,v=line.split("=",1);values.setdefault(k.strip(),v.strip().strip("\"'"))
     def api(path,payload=None):
-        request=urllib.request.Request("http://127.0.0.1:8081/swarm/api"+path,
+        request=urllib.request.Request("http://127.0.0.1:8081/peerfoundry/api"+path,
             data=json.dumps(payload).encode() if payload is not None else None,
             headers={"X-API-Key":values["ADMIN_KEY"],"Content-Type":"application/json"})
         with urllib.request.urlopen(request,timeout=10)as response:return json.load(response)

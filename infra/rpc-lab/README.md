@@ -7,7 +7,7 @@ coordinator in one subnet and AZ. Llama 3.2 3B Q8_0's 3.4 GB weights exceed eith
 GPU alone. This is a smaller-scale test of the same model-splitting mechanism.
 The optional `large` profile uses two `g4dn.xlarge` Spot instances (16 GiB T4 each)
 with Qwen3 32B's roughly 20 GB Q4_K_M weights. The actual
-Swarm request path forms the cluster and returns two short chat responses.
+PeerFoundry request path forms the cluster and returns two short chat responses.
 
 The lab owns its VPC, subnet, internet gateway, routing, security groups, IAM
 roles/profiles/policies, generated API keys and SSM parameters, private S3 source
@@ -162,12 +162,12 @@ aws ssm start-session --region us-east-1 --target INSTANCE_ID
 Inside a session:
 
 ```bash
-sudo tail -50 /var/log/swarm-bootstrap.log
-sudo journalctl -u swarm-lab --no-pager -n 60
+sudo tail -50 /var/log/peerfoundry-bootstrap.log
+sudo journalctl -u peerfoundry-lab --no-pager -n 60
 sudo nvidia-smi
-sudo tail -80 /var/log/swarm-llama.log
+sudo tail -80 /var/log/peerfoundry-llama.log
 sudo tail -40 /var/log/swarm-rpc.log
-sudo systemctl list-timers swarm-expire.timer
+sudo systemctl list-timers peerfoundry-expire.timer
 ```
 
 Interactive sessions require the AWS Session Manager plugin. Only private GPU
@@ -188,7 +188,7 @@ Production files are not rewritten. The experiment applies a small adapter in
 
 1. Resolve llama.cpp to the locally compiled, pinned binaries. Bridge the agent's
    `llama-rpc-server` name to upstream's `ggml-rpc-server`. Install Ollama under
-   `/opt/swarm/ollama` so its bundled server lookup does not select the separate
+   `/opt/peerfoundry/ollama` so its bundled server lookup does not select the separate
    RPC wrapper. Check Ollama startup and prepare the model before compiling.
    Give cloud-init the root user's normal home directory: Ollama panics when
    cloud-init's sparse environment omits `HOME`.

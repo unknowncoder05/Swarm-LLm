@@ -1,0 +1,13 @@
+# Include these locations inside the HTTPS server for peerfoundry.example.com.
+    # PeerFoundry controller: dashboard, API, and agent downloads.
+    location = /peerfoundry {
+        return 308 /peerfoundry/;
+    }
+
+    location ^~ /peerfoundry/ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 3660s;  # includes cold model loading over the HTTPS relay
+        proxy_buffering off;
+    }
+

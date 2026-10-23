@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the OpenCode provider profile for the Swarm endpoint."""
+"""Generate the OpenCode provider profile for the PeerFoundry endpoint."""
 import argparse
 import json
 import os
@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS = ("qwen3.8:27b-q4_K_M", "qwen3:30b-a3b", "qwen3:14b", "qwen3:8b", "devstral-small-2:24b", "devstral:24b",
           "ministral-3:8b", "qwen2.5-coder:0.5b", "qwen2.5-coder:1.5b", "qwen2.5-coder:3b",
           "qwen2.5-coder:7b", "qwen2.5-coder:14b", "deepseek-r1:14b")
-DEFAULT_BASE_URL = "http://127.0.0.1:8081/swarm/api/v1"
-BASE_URL_ENV = "{env:SWARM_BASE_URL}"
+DEFAULT_BASE_URL = "http://127.0.0.1:8081/peerfoundry/api/v1"
+BASE_URL_ENV = "{env:PEERFOUNDRY_BASE_URL}"
 
 
 def _load_setting(names, root, environ):
@@ -43,21 +43,47 @@ def _load_setting(names, root, environ):
 
 def load_consumer_key(root=ROOT, environ=None):
     """Environment overrides client-only credentials, then coordinator .env."""
-    return _load_setting(("SWARM_CONSUMER_KEY", "CONSUMER_KEY"), root, environ)
+    return _load_setting(("PEERFOUNDRY_CONSUMER_KEY", "SWARM_CONSUMER_KEY", "CONSUMER_KEY"), root, environ)
 
 
 def load_base_url(root=ROOT, environ=None, default=DEFAULT_BASE_URL):
-    return _load_setting(("SWARM_BASE_URL",), root, environ) or default
+    return _load_setting(("PEERFOUNDRY_BASE_URL", "SWARM_BASE_URL"), root, environ) or default
 
 
 def save_client_settings(root, base_url, key=None):
     path = root / ".env.opencode"
     lines = path.read_text(encoding="utf-8-sig").splitlines() if path.exists() else []
-    settings = {"SWARM_BASE_URL": base_url}
+    settings = {"PEERFOUNDRY_BASE_URL": base_url}
     if key is not None:
-        settings["SWARM_CONSUMER_KEY"] = key
+        settings["PEERFOUNDRY_CONSUMER_KEY"] = key
     lines = [line for line in lines if line.split("=", 1)[0].strip() not in settings]
     write_private(path, "\n".join(lines + [name + "=" + json.dumps(value) for name, value in settings.items()]) + "\n")
+
+
+def migrate_legacy_config(config):
+    """Retain saved model profiles while moving the old provider to PeerFoundry."""
+    if not isinstance(config, dict):
+        raise ValueError("OpenCode config must be a JSON object")
+    result = json.loads(json.dumps(config))
+    providers = result.get("provider", {})
+    if isinstance(providers, dict) and "swarm-llm" in providers:
+        legacy = providers.pop("swarm-llm")
+        providers["peerfoundry"] = merge_config(legacy, providers.get("peerfoundry", {}))
+    def references(value):
+        if isinstance(value, dict):
+            return {k: references(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [references(v) for v in value]
+        if value == "{env:SWARM_BASE_URL}":
+            return BASE_URL_ENV
+        if value == "{env:SWARM_CONSUMER_KEY}":
+            return "{env:PEERFOUNDRY_CONSUMER_KEY}"
+        if value == "Swarm LLM":
+            return "PeerFoundry"
+        if isinstance(value, str) and (value == "swarm-llm" or value.startswith("swarm-llm/")):
+            return "peerfoundry" + value[len("swarm-llm"):]
+        return value
+    return references(result)
 
 
 def merge_config(existing, generated):
@@ -73,15 +99,15 @@ def merge_config(existing, generated):
         else:
             result[key] = value
     # Existing provider filters must not hide the provider being configured.
-    if "provider" in generated and "swarm-llm" in generated["provider"]:
+    if "provider" in generated and "peerfoundry" in generated["provider"]:
         if "enabled_providers" in result:
             if not isinstance(result["enabled_providers"], list):
                 raise ValueError("enabled_providers must be an array")
-            result["enabled_providers"] = list(dict.fromkeys([*result["enabled_providers"], "swarm-llm"]))
+            result["enabled_providers"] = list(dict.fromkeys([*result["enabled_providers"], "peerfoundry"]))
         if "disabled_providers" in result:
             if not isinstance(result["disabled_providers"], list):
                 raise ValueError("disabled_providers must be an array")
-            result["disabled_providers"] = [p for p in result["disabled_providers"] if p != "swarm-llm"]
+            result["disabled_providers"] = [p for p in result["disabled_providers"] if p != "peerfoundry"]
     return result
 
 
@@ -100,7 +126,7 @@ def write_private(path, content):
 
 def update_config(path, config):
     existing = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
-    write_private(path, json.dumps(merge_config(existing, config), indent=2) + "\n")
+    write_private(path, json.dumps(merge_config(migrate_legacy_config(existing), config), indent=2) + "\n")
 
 
 def choose_model(advertised, requested=None):
@@ -117,7 +143,7 @@ def build_config(model, base_url=BASE_URL_ENV, context=32768, advertised=None):
     names = MODELS if advertised is None else advertised
     models = {name: {"name": name} for name in dict.fromkeys((*names, model))}
     # Other deployments may expose custom models; retain their existing metadata.
-    # These bounded profiles match Swarm's conservative minimum context policies.
+    # These bounded profiles match PeerFoundry's conservative minimum context policies.
     profiles = {"qwen3:8b": 2048, "qwen3:14b": 4096, "gemma4:12b": 2048,
                 "devstral-small-2:24b": 2048, "qwen3.6:27b": 4096,
                 "qwen3:30b": 4096, "qwen3:32b": 4096, "qwen3:30b-a3b": context,
@@ -133,15 +159,15 @@ def build_config(model, base_url=BASE_URL_ENV, context=32768, advertised=None):
             profile["options"] = {"options": {"num_ctx": context}}
         if name == "qwen3.8:27b-q4_K_M":
             profile["options"] = {"options": {"num_ctx": window}}
-    config = {"$schema": "https://opencode.ai/config.json", "model": "swarm-llm/" + model,
-        "small_model": "swarm-llm/" + model,
-        "provider": {"swarm-llm": {"npm": "@ai-sdk/openai-compatible", "name": "Swarm LLM",
-            "options": {"baseURL": base_url.rstrip("/"), "apiKey": "{env:SWARM_CONSUMER_KEY}",
+    config = {"$schema": "https://opencode.ai/config.json", "model": "peerfoundry/" + model,
+        "small_model": "peerfoundry/" + model,
+        "provider": {"peerfoundry": {"npm": "@ai-sdk/openai-compatible", "name": "PeerFoundry",
+            "options": {"baseURL": base_url.rstrip("/"), "apiKey": "{env:PEERFOUNDRY_CONSUMER_KEY}",
                         "timeout": 3700000, "headerTimeout": 3700000, "chunkTimeout": 3700000},
             "models": models}}}
     if advertised is not None:
         # Keep saved overrides, but hide stale static entries from the picker.
-        config["provider"]["swarm-llm"]["whitelist"] = list(models)
+        config["provider"]["peerfoundry"]["whitelist"] = list(models)
     return config
 
 
@@ -166,7 +192,7 @@ def main():
     config = build_config(model, BASE_URL_ENV, args.context)
     save_client_settings(ROOT, args.base_url)
     update_config(args.output, config)
-    print(f"{args.output}: swarm-llm/{model} ({'advertised' if model in advertised else 'not currently advertised'})")
+    print(f"{args.output}: peerfoundry/{model} ({'advertised' if model in advertised else 'not currently advertised'})")
     print("Use python3 scripts/run-opencode.py to load the consumer credential privately from .env.")
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise OpenCode read/edit/test tools against the distributed Swarm model."""
+"""Exercise OpenCode read/edit/test tools against the distributed PeerFoundry model."""
 import argparse
 from datetime import datetime, timezone
 import importlib.util
@@ -56,25 +56,25 @@ def main():
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     evidence_dir = ROOT / ".rpc-trial" / (stamp + "-opencode")
     evidence_dir.mkdir(parents=True)
-    trial = Path(tempfile.mkdtemp(prefix="swarm-opencode-"))
+    trial = Path(tempfile.mkdtemp(prefix="peerfoundry-opencode-"))
     workspace = trial / "workspace"
     workspace.mkdir()
     (workspace / "labels.py").write_text("def normalize_labels(labels):\n    return sorted(set(labels))\n")
     (workspace / "test_labels.py").write_text(TESTS)
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
-    model = "swarm-llm/" + args.model
-    spec = importlib.util.spec_from_file_location("swarm_opencode_config", ROOT / "scripts/gen_opencode_config.py")
+    model = "peerfoundry/" + args.model
+    spec = importlib.util.spec_from_file_location("peerfoundry_opencode_config", ROOT / "scripts/gen_opencode_config.py")
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
     config = generator.build_config(args.model, context=args.context)
     # Apply the requested fixture window to the model under test as well as the
     # generator's legacy 30B profile; otherwise small static profiles compact
     # before this coding task can exercise editing and test execution.
-    profile = config["provider"]["swarm-llm"]["models"][args.model]
+    profile = config["provider"]["peerfoundry"]["models"][args.model]
     profile["limit"] = {"context": args.context, "output": min(4096, args.context // 8)}
     profile.setdefault("options", {}).setdefault("options", {})["num_ctx"] = args.context
     config.update({
-        "enabled_providers": ["swarm-llm"], "autoupdate": False, "share": "disabled", "snapshot": False,
+        "enabled_providers": ["peerfoundry"], "autoupdate": False, "share": "disabled", "snapshot": False,
         "tools": {"task": False, "webfetch": False, "websearch": False, "skill": False,
                   "lsp": False, "question": False, "todowrite": False},
         "permission": {"*": "deny", "read": "allow", "edit": "allow", "glob": "allow", "grep": "allow",
@@ -85,13 +85,13 @@ def main():
     profile_path = ROOT / "opencode.json"
     if profile_path.exists():
         title_model = json.loads(profile_path.read_text()).get("agent", {}).get("title", {}).get("model")
-        if title_model and title_model.startswith("swarm-llm/"):
+        if title_model and title_model.startswith("peerfoundry/"):
             config["agent"]["title"] = {"model": title_model}
     if args.title_model:
-        config["agent"]["title"] = {"model": "swarm-llm/" + args.title_model}
+        config["agent"]["title"] = {"model": "peerfoundry/" + args.title_model}
     config_path = trial / "opencode.json"
     config_path.write_text(json.dumps(config, indent=2))
-    child_env = dict(os.environ, SWARM_CONSUMER_KEY=values["CONSUMER_KEY"], OPENCODE_CONFIG=str(config_path),
+    child_env = dict(os.environ, PEERFOUNDRY_CONSUMER_KEY=values["CONSUMER_KEY"], OPENCODE_CONFIG=str(config_path),
         OPENCODE_DISABLE_AUTOUPDATE="true", OPENCODE_DISABLE_LSP_DOWNLOAD="true",
         OPENCODE_DISABLE_DEFAULT_PLUGINS="true")
     child_env.pop("OPENCODE_CONFIG_CONTENT", None)

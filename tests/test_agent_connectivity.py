@@ -104,3 +104,28 @@ class ConnectivityTests(unittest.TestCase):
         get.assert_not_called()
         self.assertEqual(self.a._chat_claim, (None, None))
         self.assertFalse(self.a._rpc_assigned.is_set())
+
+    def test_non_streaming_rpc_inference_stops_when_consumer_cancels(self):
+        assignment = {"cluster_id": "cluster-1"}
+        cancelled = unittest.mock.Mock()
+        cancelled.raise_for_status.return_value = None
+        cancelled.json.return_value = {"cancelled": True}
+        self.a._chat_claim = ("job-1", "claim-1")
+        with patch.object(self.a, "rpc_infer", side_effect=lambda *_args, **_kwargs: time.sleep(30)), \
+             patch.object(self.a, "_check_rpc_quic"), \
+             patch.object(self.a, "_rpc_poll_assignment", return_value=assignment), \
+             patch.object(self.a.requests, "get", return_value=cancelled) as get:
+            with self.assertRaisesRegex(self.a.RpcStreamCancelled, "cancelled native inference"):
+                self.a._rpc_infer_with_health({}, 18080, assignment, "https://coordinator", "agent-key")
+        get.assert_called_once()
+        self.assertIn("/agent/jobs/job-1/cancelled", get.call_args.args[0])
+
+    def test_restarted_agent_acknowledges_assignment_already_dissolving(self):
+        assignment = {"cluster_id": "cluster-1", "role": "worker", "dissolve": True}
+        with patch.object(self.a, "_rpc_poll_assignment", return_value=assignment), \
+             patch.object(self.a, "_post_agent_receipt", side_effect=RuntimeError("stop")) as receipt:
+            with self.assertRaisesRegex(RuntimeError, "stop"):
+                self.a._rpc_thread_func("https://coordinator", "agent-key")
+        receipt.assert_called_once()
+        self.assertEqual(receipt.call_args.kwargs["payload"], {
+            "agent_id": self.a._agent_id, "cluster_id": "cluster-1", "role": "worker"})

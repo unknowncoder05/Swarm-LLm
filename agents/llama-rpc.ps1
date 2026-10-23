@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     llama.cpp RPC agent: splits a GGUF model across multiple machines and
-    registers the combined endpoint with the swarm-llm coordinator.
+    registers the combined endpoint with the peerfoundry coordinator.
 
 .DESCRIPTION
     Two roles:
@@ -17,7 +17,7 @@
     "primary" or "worker". Omit to enter the interactive wizard.
 
 .PARAMETER Coordinator
-    HTTPS URL of the swarm-llm coordinator.  Required for primary role.
+    HTTPS URL of the peerfoundry coordinator.  Required for primary role.
 
 .PARAMETER ApiKey
     Coordinator agent API key.  Required for primary role.
@@ -34,7 +34,7 @@
 
 .PARAMETER Workers
     Comma-separated RPC worker endpoints for the primary role.
-    Example: "192.168.1.10:50052,192.168.1.11:50052"
+    Example: "192.0.2.10:50052,192.0.2.11:50052"
     Leave empty to run without remote workers (single-machine mode).
 
 .PARAMETER LlamaPort
@@ -61,7 +61,7 @@
     .\llama-rpc.ps1 -Role primary `
         -Coordinator https://coordinator.example.com -ApiKey abc123 `
         -ModelAlias "qwen3.6:27b" -ModelPath "qwen3.6:27b" `
-        -Workers "192.168.1.10:50052"
+        -Workers "192.0.2.10:50052"
 #>
 param(
     [string]$Role        = "",
@@ -444,7 +444,7 @@ function Start-WorkLoop([string]$url, [string]$key, [int]$port, [System.Diagnost
 function Start-Wizard {
     $hw = Get-HardwareQuick
     Write-Host ""
-    Write-Host "  swarm-llm  |  llama.cpp RPC agent" -ForegroundColor Cyan
+    Write-Host "  PeerFoundry  |  llama.cpp RPC agent" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Detected: $($hw.gpu_name) ($($hw.vram_gb) GB VRAM)  |  $($hw.ram_gb) GB RAM" -ForegroundColor DarkCyan
     Write-Host ""
@@ -476,7 +476,7 @@ function Start-Wizard {
         Write-Host "  Model path / Ollama name / HF repo: " -NoNewline -ForegroundColor Yellow
         $cfg.ModelPath = (Read-Host).Trim()
 
-        Write-Host "  RPC worker endpoints (e.g. 192.168.1.10:50052), blank = none: " -NoNewline -ForegroundColor Yellow
+        Write-Host "  RPC worker endpoints (e.g. 192.0.2.10:50052), blank = none: " -NoNewline -ForegroundColor Yellow
         $cfg.Workers = (Read-Host).Trim()
     }
 

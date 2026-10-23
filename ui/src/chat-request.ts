@@ -37,7 +37,7 @@ export async function requestChatCompletion(
       throw new Error(`Timed out waiting for available GPUs or a working route for '${payload.model}'. Check the Machines tab and try again.`);
     }
     options.onPhase("preparing");
-    const response = await fetch("/swarm/api/v1/chat/completions", {
+    const response = await fetch("/peerfoundry/api/v1/chat/completions", {
       method: "POST",
       headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
       body,

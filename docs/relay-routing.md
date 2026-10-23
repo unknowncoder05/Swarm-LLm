@@ -99,11 +99,11 @@ The renamed module retains the small instance/default-VPC/budget/runtime checks.
 No cloud resource is created by a preview or configuration command.
 
 ```sh
-python3 scripts/configure-relay-provisioner.py --bind 172.17.0.1
-python3 scripts/configure-relay-provisioner.py --bind 172.17.0.1 --apply
-sudo install -m 0644 .rpc-trial/relay-provisioner/swarm-relay-provisioner.service /etc/systemd/system/
+python3 scripts/configure-relay-provisioner.py --bind <docker-bridge-gateway>
+python3 scripts/configure-relay-provisioner.py --bind <docker-bridge-gateway> --apply
+sudo install -m 0644 .rpc-trial/relay-provisioner/peerfoundry-relay-provisioner.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now swarm-relay-provisioner
+sudo systemctl enable --now peerfoundry-relay-provisioner
 # Deploy the coordinator after draining existing work.
 ```
 

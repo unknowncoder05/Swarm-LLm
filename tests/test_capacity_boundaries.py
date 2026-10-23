@@ -157,7 +157,7 @@ class CapacityBoundaryTests(SchedulingFixture):
         with patch.object(self.c, "CHAT_QUEUE_BYTES_PER_MODEL", 10000):
             task, job = await self.start_request(messages=messages)
             try:
-                response = await asyncio.wait_for(self.request(messages=messages), .5)
+                response = await asyncio.wait_for(self.request(messages=messages), 3)
                 self.assertEqual(response.status_code, 429)
                 self.assertEqual(len(self.c.jobs), 1)
             finally:

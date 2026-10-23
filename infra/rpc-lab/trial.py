@@ -72,8 +72,8 @@ def wait_ready(lab, timeout=4500):
                 checks[instance] = send(region, instance, [
                     "set -eu",
                     "cloud-init status --wait >/dev/null",
-                    "systemctl is-active --quiet swarm-lab.service",
-                    "test -s /opt/swarm/config.json",
+                    "systemctl is-active --quiet peerfoundry-lab.service",
+                    "test -s /opt/peerfoundry/config.json",
                 ], timeout=timeout)
             try:
                 result = invocation(region, instance, checks[instance])
@@ -99,16 +99,16 @@ def evidence(lab):
     for instance in [lab["coordinator_id"]] + lab["gpu_ids"]:
         try:
             commands[instance] = send(lab["region"], instance, [
-                "echo '--- devices ---'; cat /var/log/swarm-devices.log 2>/dev/null || true",
+                "echo '--- devices ---'; cat /var/log/peerfoundry-devices.log 2>/dev/null || true",
                 "echo '--- GPU allocations ---'; nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv 2>/dev/null || true",
                 "echo '--- GPU processes ---'; nvidia-smi --query-compute-apps=process_name,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null || true",
-                "echo '--- device buffers ---'; grep -E 'CUDA|RPC|offload|buffer|split' /var/log/swarm-llama.log 2>/dev/null | tail -40 || true",
-                "echo '--- llama allocations ---'; tail -65 /var/log/swarm-llama.log 2>/dev/null || true",
+                "echo '--- device buffers ---'; grep -E 'CUDA|RPC|offload|buffer|split' /var/log/peerfoundry-llama.log 2>/dev/null | tail -40 || true",
+                "echo '--- llama allocations ---'; tail -65 /var/log/peerfoundry-llama.log 2>/dev/null || true",
                 "echo '--- RPC allocations ---'; tail -30 /var/log/swarm-rpc.log 2>/dev/null || true",
                 # Keep proof first: SSM truncates large command output.
-                "echo '--- bootstrap ---'; tail -30 /var/log/swarm-bootstrap.log | tr '\\r' '\\n' | tail -30 | cut -c1-240",
-                "echo '--- service ---'; journalctl -u swarm-lab --no-pager -n 35",
-                "echo '--- Ollama preparation ---'; tail -35 /var/log/swarm-ollama-prepare.log 2>/dev/null | cut -c1-240 || true",
+                "echo '--- bootstrap ---'; tail -30 /var/log/peerfoundry-bootstrap.log | tr '\\r' '\\n' | tail -30 | cut -c1-240",
+                "echo '--- service ---'; journalctl -u peerfoundry-lab --no-pager -n 35",
+                "echo '--- Ollama preparation ---'; tail -35 /var/log/peerfoundry-ollama-prepare.log 2>/dev/null | cut -c1-240 || true",
             ])
         except Exception as exc:
             results[instance] = {"error": str(exc)}
@@ -168,7 +168,7 @@ def main():
         report["lab"] = lab
         wait_ready(lab)
         command_id = send(lab["region"], lab["coordinator_id"], [
-            "/opt/swarm/venv/bin/python /opt/swarm/smoke.py",
+            "/opt/peerfoundry/venv/bin/python /opt/peerfoundry/smoke.py",
         ], timeout=2400)
         result = wait_command(lab["region"], lab["coordinator_id"], command_id, 2460)
         report["smoke"] = result

@@ -1,7 +1,7 @@
 # Qwen3.8-27B across GPU machines
 
 The upstream [Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) is a dense
-27B model built on the Qwen3.5 hybrid architecture. Swarm uses the explicit
+27B model built on the Qwen3.5 hybrid architecture. PeerFoundry uses the explicit
 [Ollama Q4_K_M artifact](https://ollama.com/library/qwen3.8:27b-q4_K_M),
 `qwen3.8:27b-q4_K_M`, for its existing llama.cpp RPC path.
 

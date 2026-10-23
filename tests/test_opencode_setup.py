@@ -30,52 +30,52 @@ class OpenCodeSetupTests(unittest.TestCase):
     def run_setup(self, argv=(), **extra):
         with patch.object(self.setup, "ROOT", self.root), \
              patch.object(self.setup, "load_launcher", return_value=self.launcher), \
-             patch.dict(os.environ, {"SWARM_CONSUMER_KEY": "test-secret", "SWARM_BASE_URL": "https://swarm.example/v1"}, clear=True), \
+             patch.dict(os.environ, {"PEERFOUNDRY_CONSUMER_KEY": "test-secret", "PEERFOUNDRY_BASE_URL": "https://peerfoundry.example/v1"}, clear=True), \
              patch.object(self.setup.subprocess, "run", return_value=Mock(stdout="1.18.32\n")) as run, \
              contextlib.redirect_stdout(self.output), contextlib.redirect_stderr(self.output):
             if extra.get("missing_key"):
                 os.environ.clear()
-                os.environ["SWARM_BASE_URL"] = "https://swarm.example/v1"
+                os.environ["PEERFOUNDRY_BASE_URL"] = "https://peerfoundry.example/v1"
             return self.setup.main(list(argv)), run
 
-    def test_merge_is_repeatable_preserves_settings_and_unhides_swarm(self):
+    def test_merge_is_repeatable_preserves_settings_and_unhides_peerfoundry(self):
         path = self.root / "opencode.json"
         original = {"permission": {"bash": "ask"}, "provider": {"other": {"name": "Keep me"},
-                    "swarm-llm": {"models": {"custom": {"name": "Keep too"}}}},
-                    "enabled_providers": ["other"], "disabled_providers": ["swarm-llm", "blocked"]}
+                    "peerfoundry": {"models": {"custom": {"name": "Keep too"}}}},
+                    "enabled_providers": ["other"], "disabled_providers": ["peerfoundry", "blocked"]}
         path.write_text(json.dumps(original))
         for _ in range(2):
             self.run_setup(["--offline"])
         config = json.loads(path.read_text())
         self.assertEqual(config["permission"], original["permission"])
         self.assertEqual(config["provider"]["other"], original["provider"]["other"])
-        self.assertIn("custom", config["provider"]["swarm-llm"]["models"])
-        self.assertEqual(config["enabled_providers"], ["other", "swarm-llm"])
+        self.assertIn("custom", config["provider"]["peerfoundry"]["models"])
+        self.assertEqual(config["enabled_providers"], ["other", "peerfoundry"])
         self.assertEqual(config["disabled_providers"], ["blocked"])
-        self.assertEqual(config["model"], "swarm-llm/qwen3:30b-a3b")
+        self.assertEqual(config["model"], "peerfoundry/qwen3:30b-a3b")
         self.assertNotIn("test-secret", path.read_text() + self.output.getvalue())
-        self.assertNotIn("https://swarm.example/v1", path.read_text())
-        self.assertEqual(config["provider"]["swarm-llm"]["options"]["baseURL"], "{env:SWARM_BASE_URL}")
-        self.assertEqual(self.config.load_base_url(self.root, {}), "https://swarm.example/v1")
+        self.assertNotIn("https://peerfoundry.example/v1", path.read_text())
+        self.assertEqual(config["provider"]["peerfoundry"]["options"]["baseURL"], "{env:PEERFOUNDRY_BASE_URL}")
+        self.assertEqual(self.config.load_base_url(self.root, {}), "https://peerfoundry.example/v1")
 
     def test_environment_client_file_and_server_file_precedence(self):
         (self.root / ".env").write_text('CONSUMER_KEY="server"\nUNRELATED="C:\\Windows"\n')
-        (self.root / ".env.opencode").write_text('\ufeffSWARM_CONSUMER_KEY="client"\n', encoding="utf-8")
+        (self.root / ".env.opencode").write_text('\ufeffPEERFOUNDRY_CONSUMER_KEY="client"\n', encoding="utf-8")
         self.assertEqual(self.config.load_consumer_key(self.root, {}), "client")
         self.assertEqual(self.config.load_consumer_key(self.root, {"CONSUMER_KEY": "env"}), "env")
         (self.root / ".env.opencode").unlink()
         self.assertEqual(self.config.load_consumer_key(self.root, {}), "server")
-        (self.root / ".env").write_text('SWARM_CONSUMER_KEY="server-swarm"\n')
-        self.assertEqual(self.config.load_consumer_key(self.root, {}), "server-swarm")
+        (self.root / ".env").write_text('PEERFOUNDRY_CONSUMER_KEY="server-peerfoundry"\n')
+        self.assertEqual(self.config.load_consumer_key(self.root, {}), "server-peerfoundry")
 
-    def test_launcher_reads_swarm_named_credential_from_env_file(self):
+    def test_launcher_reads_peerfoundry_named_credential_from_env_file(self):
         launcher = load("opencode_setup_launcher", ROOT / "scripts/run-opencode.py")
-        (self.root / ".env").write_text("SWARM_CONSUMER_KEY=client-secret\n")
+        (self.root / ".env").write_text("PEERFOUNDRY_CONSUMER_KEY=client-secret\n")
         with patch.object(launcher, "ROOT", self.root), patch.dict(os.environ, {}, clear=True), \
              patch.object(launcher, "find_executable", return_value="/fake/opencode"), \
              patch.object(launcher.os, "execve") as execute:
             launcher.main()
-        self.assertEqual(execute.call_args.args[2]["SWARM_CONSUMER_KEY"], "client-secret")
+        self.assertEqual(execute.call_args.args[2]["PEERFOUNDRY_CONSUMER_KEY"], "client-secret")
 
     def test_auth_failure_does_not_install_or_change_config(self):
         path = self.root / "opencode.json"
@@ -105,7 +105,7 @@ class OpenCodeSetupTests(unittest.TestCase):
         with patch.object(self.setup, "check_connection", return_value=[]):
             self.run_setup()
         config = json.loads((self.root / "opencode.json").read_text())
-        self.assertEqual(config["model"], "swarm-llm/qwen3:30b-a3b")
+        self.assertEqual(config["model"], "peerfoundry/qwen3:30b-a3b")
         self.assertIn("not currently advertised", self.output.getvalue())
 
     def test_prompted_key_is_saved_privately_and_reused_without_server_credentials(self):
@@ -142,14 +142,14 @@ class OpenCodeSetupTests(unittest.TestCase):
 
     def test_discovered_models_are_printed_and_visible_without_static_ghost_entries(self):
         path = self.root / "opencode.json"
-        path.write_text(json.dumps({"provider": {"swarm-llm": {"models": {
+        path.write_text(json.dumps({"provider": {"peerfoundry": {"models": {
             "old-model": {"name": "Preserve override"},
             "qwen3.6:27b": {"limit": {"context": 8192, "output": 4096}}}}}}))
         advertised = ["qwen3:30b-a3b", "qwen3.6:27b", "gemma4:12b"]
         with patch.object(self.setup, "check_connection", return_value=advertised):
             self.run_setup(["--model", "qwen3.6:27b"])
         config = json.loads(path.read_text())
-        provider = config["provider"]["swarm-llm"]
+        provider = config["provider"]["peerfoundry"]
         self.assertEqual(provider["whitelist"], advertised)
         self.assertIn("old-model", provider["models"])
         self.assertNotIn("devstral:24b", provider["models"])
@@ -176,22 +176,22 @@ class OpenCodeSetupTests(unittest.TestCase):
     def test_fresh_setup_prompts_for_url_and_key_and_selects_from_discovery(self):
         with patch.object(self.setup, "ROOT", self.root), patch.dict(os.environ, {}, clear=True), \
              patch.object(self.setup.sys.stdin, "isatty", return_value=True), \
-             patch("builtins.input", side_effect=["https://provided.example/swarm/api/v1", "2"]), \
+             patch("builtins.input", side_effect=["https://provided.example/peerfoundry/api/v1", "2"]), \
              patch.object(self.setup.getpass, "getpass", return_value="provided-key"), \
              patch.object(self.setup, "check_connection", return_value=["qwen3:30b-a3b", "qwen3:8b"]) as discover, \
              patch.object(self.setup, "load_launcher", return_value=self.launcher), \
              patch.object(self.setup.subprocess, "run", return_value=Mock(stdout="1.18.32\n")), \
              contextlib.redirect_stdout(self.output):
             self.setup.main([])
-        discover.assert_called_once_with("https://provided.example/swarm/api/v1", "provided-key")
+        discover.assert_called_once_with("https://provided.example/peerfoundry/api/v1", "provided-key")
         config = json.loads((self.root / "opencode.json").read_text())
-        self.assertEqual(config["model"], "swarm-llm/qwen3:8b")
+        self.assertEqual(config["model"], "peerfoundry/qwen3:8b")
         self.assertEqual(config["small_model"], config["model"])
         self.assertNotIn("provided-key", self.output.getvalue() + json.dumps(config))
 
     def test_missing_url_fails_before_sending_the_consumer_key(self):
         with patch.object(self.setup, "ROOT", self.root), \
-             patch.dict(os.environ, {"SWARM_CONSUMER_KEY": "secret"}, clear=True), \
+             patch.dict(os.environ, {"PEERFOUNDRY_CONSUMER_KEY": "secret"}, clear=True), \
              patch.object(self.setup.sys.stdin, "isatty", return_value=False), \
              patch.object(self.setup, "check_connection") as discover, \
              contextlib.redirect_stderr(self.output):
@@ -202,10 +202,10 @@ class OpenCodeSetupTests(unittest.TestCase):
 
     def test_existing_url_and_selected_model_are_reused_without_an_implicit_model_change(self):
         path = self.root / "opencode.json"
-        path.write_text(json.dumps({"model": "swarm-llm/gemma4:12b", "provider": {"swarm-llm": {
+        path.write_text(json.dumps({"model": "peerfoundry/gemma4:12b", "provider": {"peerfoundry": {
             "options": {"baseURL": "https://saved.example/v1"}}}}))
         with patch.object(self.setup, "ROOT", self.root), \
-             patch.dict(os.environ, {"SWARM_CONSUMER_KEY": "secret"}, clear=True), \
+             patch.dict(os.environ, {"PEERFOUNDRY_CONSUMER_KEY": "secret"}, clear=True), \
              patch.object(self.setup.sys.stdin, "isatty", return_value=False), \
              patch.object(self.setup, "check_connection", return_value=["qwen3:8b"]) as discover, \
              patch.object(self.setup, "load_launcher", return_value=self.launcher), \
@@ -214,30 +214,30 @@ class OpenCodeSetupTests(unittest.TestCase):
             self.setup.main([])
         discover.assert_called_once_with("https://saved.example/v1", "secret")
         config = json.loads(path.read_text())
-        self.assertEqual(config["model"], "swarm-llm/gemma4:12b")
-        self.assertIn("gemma4:12b", config["provider"]["swarm-llm"]["whitelist"])
+        self.assertEqual(config["model"], "peerfoundry/gemma4:12b")
+        self.assertIn("gemma4:12b", config["provider"]["peerfoundry"]["whitelist"])
 
     def test_offline_refresh_keeps_saved_picker_and_context_overrides(self):
         path = self.root / "opencode.json"
         profile = self.config.build_config("qwen3:30b-a3b", context=16384, advertised=["qwen3:30b-a3b"])
-        profile["provider"]["swarm-llm"]["models"]["hidden-old-model"] = {"name": "keep hidden"}
+        profile["provider"]["peerfoundry"]["models"]["hidden-old-model"] = {"name": "keep hidden"}
         path.write_text(json.dumps(profile))
         self.run_setup(["--offline"])
-        provider = json.loads(path.read_text())["provider"]["swarm-llm"]
+        provider = json.loads(path.read_text())["provider"]["peerfoundry"]
         self.assertEqual(provider["whitelist"], ["qwen3:30b-a3b"])
         self.assertEqual(provider["models"]["qwen3:30b-a3b"]["limit"]["context"], 16384)
         self.run_setup(["--offline", "--context", "8192"])
-        provider = json.loads(path.read_text())["provider"]["swarm-llm"]
+        provider = json.loads(path.read_text())["provider"]["peerfoundry"]
         self.assertEqual(provider["models"]["qwen3:30b-a3b"]["options"]["options"]["num_ctx"], 8192)
 
     def test_separate_title_model_preserves_coding_and_summary_quality_settings(self):
         with patch.object(self.setup, "check_connection", return_value=["qwen3:30b-a3b", "qwen3:14b"]):
             self.run_setup(["--title-model", "qwen3:14b"])
         config = json.loads((self.root / "opencode.json").read_text())
-        self.assertEqual(config["model"], "swarm-llm/qwen3:30b-a3b")
+        self.assertEqual(config["model"], "peerfoundry/qwen3:30b-a3b")
         self.assertEqual(config["small_model"], config["model"])
-        self.assertEqual(config["agent"]["title"]["model"], "swarm-llm/qwen3:14b")
-        self.assertEqual(config["provider"]["swarm-llm"]["models"]["qwen3:30b-a3b"]["limit"]["context"], 32768)
+        self.assertEqual(config["agent"]["title"]["model"], "peerfoundry/qwen3:14b")
+        self.assertEqual(config["provider"]["peerfoundry"]["models"]["qwen3:30b-a3b"]["limit"]["context"], 32768)
         with patch.object(self.setup, "check_connection", return_value=[]):
             with self.assertRaises(SystemExit):
                 self.run_setup(["--title-model", "unknown"])

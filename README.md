@@ -1,12 +1,18 @@
-# Swarm LLM
+# PeerFoundry
 
 Run language models across your own GPU machines, with one API and a dashboard
 for model placement, worker health and inference requests.
 
-Swarm supports both **independent workers** for more simultaneous requests and
+PeerFoundry supports both **independent workers** for more simultaneous requests and
 **distributed inference** for models too large for one GPU. A Python coordinator
 owns scheduling; agents execute Ollama or llama.cpp on the worker machines.
 OpenCode and other OpenAI-compatible clients use the same endpoint.
+
+Built for individuals, students and educational labs that want to experiment with
+open models using GPU computers they already have. Participating machines and
+operators must trust one another; see the [security review](SECURITY.md) before
+using shared equipment or sensitive data. Existing installations should read the
+[rename and compatibility notes](docs/peerfoundry-rename.md).
 
 ## How it works
 
@@ -102,23 +108,23 @@ make init       # Creates private .env with fresh keys; preserves an existing fi
 make up
 ```
 
-Open **http://127.0.0.1:8081/swarm/** and sign in with the admin key from `.env`.
+Open **http://127.0.0.1:8081/peerfoundry/** and sign in with the admin key from `.env`.
 Use `make status` and `make health` to inspect the stack. The coordinator and UI
 ports remain inside Docker; the gateway binds to loopback.
 
 To connect other PCs, provide an HTTPS deployment URL reachable from them.
-[The nginx example](nginx/swarm.conf.example) forwards `/swarm/` to the gateway.
+[The nginx example](nginx/peerfoundry.conf.example) forwards `/peerfoundry/` to the gateway.
 The UI derives its join commands and API banner from the current browser origin.
 Keep deployment-specific URLs and credentials in ignored `.env`/`.env.opencode`
 files; optional private gateway routes belong in ignored `nginx/local.d/`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/swarm/` | Dashboard |
-| `/swarm/api` | Agent control API |
-| `/swarm/api/v1/models` | Current model catalog |
-| `/swarm/api/v1/chat/completions` | OpenAI-compatible chat |
-| `/swarm/api/healthz` | Health check |
+| `/peerfoundry/` | Dashboard |
+| `/peerfoundry/api` | Agent control API |
+| `/peerfoundry/api/v1/models` | Current model catalog |
+| `/peerfoundry/api/v1/chat/completions` | OpenAI-compatible chat |
+| `/peerfoundry/api/healthz` | Health check |
 
 ## Connect GPU agents
 
@@ -126,10 +132,10 @@ Use the dashboard's platform-specific join command, or download the supplied
 Python agent from your deployment:
 
 ```sh
-export SWARM_URL=https://swarm.example.com/swarm
-export SWARM_AGENT_KEY=your-agent-key
-curl -fsSL "$SWARM_URL/agent/agent.py" -o agent.py
-python3 agent.py --coordinator "$SWARM_URL/api" --api-key "$SWARM_AGENT_KEY"
+export PEERFOUNDRY_URL=https://peerfoundry.example.com/peerfoundry
+export PEERFOUNDRY_AGENT_KEY=your-agent-key
+curl -fsSL "$PEERFOUNDRY_URL/agent/agent.py" -o agent.py
+python3 agent.py --coordinator "$PEERFOUNDRY_URL/api" --api-key "$PEERFOUNDRY_AGENT_KEY"
 ```
 
 On Windows, use the PowerShell/CMD command shown in the dashboard. The agent
@@ -144,7 +150,7 @@ repository or external agent checkout is required to serve them.
 ## Use OpenCode
 
 ```sh
-python3 scripts/setup-opencode.py --install --base-url https://swarm.example.com/swarm/api/v1
+python3 scripts/setup-opencode.py --install --base-url https://peerfoundry.example.com/peerfoundry/api/v1
 python3 scripts/run-opencode.py
 ```
 
@@ -153,7 +159,7 @@ prompted. Use `py -3` on Windows. Setup installs the pinned CLI locally, discove
 available models and preserves other providers. The checked-in profile references
 environment variables; deployment URL and prompted key are saved privately.
 
-Choose a Swarm model with `/models`, then send a request. Model downloads and
+Choose a PeerFoundry model with `/models`, then send a request. Model downloads and
 startup happen on demand. [The client guide](docs/opencode-setup.md) covers
 refreshing the catalog, switching models, context and optional title routing.
 

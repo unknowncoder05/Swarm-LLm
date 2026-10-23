@@ -16,7 +16,7 @@ provider "aws" {
   region = "eu-south-2"
   default_tags {
     tags = {
-      Project   = "swarm-relay"
+      Project   = "peerfoundry-relay"
       ManagedBy = "Terraform"
     }
   }
@@ -28,7 +28,7 @@ provider "aws" {
 }
 
 variable "agent_key" {
-  description = "Existing Swarm agent key, supplied through a private ignored tfvars file."
+  description = "Existing PeerFoundry agent key, supplied through a private ignored tfvars file."
   type        = string
   sensitive   = true
 }
@@ -158,13 +158,13 @@ resource "random_password" "control" {
 }
 
 resource "aws_ssm_parameter" "keys" {
-  name  = "/swarm-relay/keys"
+  name  = "/peerfoundry-relay/keys"
   type  = "SecureString"
   value = jsonencode({ AGENT_KEY = var.agent_key, CONTROL_KEY = random_password.control.result })
 }
 
 resource "aws_iam_role" "relay" {
-  name_prefix = "swarm-relay-"
+  name_prefix = "peerfoundry-relay-"
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }]
@@ -185,12 +185,12 @@ resource "aws_iam_role_policy" "keys" {
 }
 
 resource "aws_iam_instance_profile" "relay" {
-  name_prefix = "swarm-relay-"
+  name_prefix = "peerfoundry-relay-"
   role        = aws_iam_role.relay.name
 }
 
 resource "aws_security_group" "relay" {
-  name_prefix = "swarm-relay-"
+  name_prefix = "peerfoundry-relay-"
   description = "Restricted HTTPS relay; public HTTP only for ACME certificate validation"
   vpc_id      = data.aws_vpc.default.id
 }
@@ -255,7 +255,7 @@ resource "aws_instance" "relay" {
     }
   }
   depends_on = [aws_iam_role_policy.keys, aws_iam_role_policy_attachment.ssm]
-  tags       = { Name = "swarm-relay" }
+  tags       = { Name = "peerfoundry-relay" }
 }
 
 resource "aws_route53_record" "relay" {

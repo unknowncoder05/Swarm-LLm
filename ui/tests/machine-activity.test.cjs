@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const out = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-ui-test-'));
+const out = fs.mkdtempSync(path.join(os.tmpdir(), 'peerfoundry-ui-test-'));
 after(() => fs.rmSync(out, { recursive: true, force: true }));
 execFileSync(path.join(root, 'node_modules/.bin/tsc'), [
   '--target', 'ES2020', '--module', 'commonjs', '--jsx', 'react-jsx',
@@ -26,9 +26,9 @@ const cluster = { cluster_id: 'replica-one', model: 'qwen3:30b-a3b', primary_id:
 test('join and API URLs follow the current deployment origin and port', () => {
   for (const origin of ['https://llm.example.com:8443', 'http://127.0.0.1:8081']) {
     const urls = deploymentUrls(origin);
-    assert.equal(urls.api, `${origin}/swarm/api`);
-    assert.equal(urls.openai, `${origin}/swarm/api/v1`);
-    assert.equal(urls.agent, `${origin}/swarm/agent/agent.py`);
+    assert.equal(urls.api, `${origin}/peerfoundry/api`);
+    assert.equal(urls.openai, `${origin}/peerfoundry/api/v1`);
+    assert.equal(urls.agent, `${origin}/peerfoundry/agent/agent.py`);
   }
 });
 

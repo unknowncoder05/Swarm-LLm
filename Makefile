@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 COMPOSE       := docker compose
 ENV_FILE      := .env
-SWARM_API     ?= $(shell python3 -c 'from scripts.gen_opencode_config import load_base_url; print(load_base_url().rsplit("/v1", 1)[0])')
-SWARM_ROOT    = $(patsubst %/api,%,$(SWARM_API))
+PEERFOUNDRY_API     ?= $(shell python3 -c 'from scripts.gen_opencode_config import load_base_url; print(load_base_url().rsplit("/v1", 1)[0])')
+PEERFOUNDRY_ROOT    = $(patsubst %/api,%,$(PEERFOUNDRY_API))
 
 # ── colour helpers ────────────────────────────────────────────────────────────
 BOLD  := \033[1m
@@ -82,12 +82,12 @@ logs-gateway: ## Tail gateway logs only
 
 .PHONY: health
 health: ## Hit the health check endpoint (no auth)
-	@curl -s http://localhost:8081/swarm/api/healthz | python3 -m json.tool
+	@curl -s http://localhost:8081/peerfoundry/api/healthz | python3 -m json.tool
 
 .PHONY: machines
 machines: check-env ## List registered machines (JSON)
 	@ADMIN_KEY=$$(grep ^ADMIN_KEY $(ENV_FILE) | cut -d= -f2); \
-	  curl -s -H "X-API-Key: $$ADMIN_KEY" http://localhost:8081/swarm/api/machines | python3 -m json.tool
+	  curl -s -H "X-API-Key: $$ADMIN_KEY" http://localhost:8081/peerfoundry/api/machines | python3 -m json.tool
 
 # ─────────────────────────────────────────────────────────────────────────────
 ## Testing
@@ -102,27 +102,27 @@ eval-setup: ## Install EvalPlus benchmark harness (HumanEval+ / MBPP+)
 	pip install evalplus
 
 .PHONY: eval-humaneval
-eval-humaneval: check-env ## Run HumanEval+ pass@1 against the swarm
+eval-humaneval: check-env ## Run HumanEval+ pass@1 against the peerfoundry
 	@CONSUMER_KEY=$$(grep ^CONSUMER_KEY $(ENV_FILE) | cut -d= -f2); \
-	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/swarm/api/v1/models \
+	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/peerfoundry/api/v1/models \
 	    | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print(d[0]['id'] if d else '')" 2>/dev/null); \
 	  if [ -z "$$MODEL" ]; then echo "$(YELLOW)No live agents — connect an agent first.$(RESET)"; exit 1; fi; \
 	  echo "$(CYAN)HumanEval+  model=$$MODEL$(RESET)"; \
 	  python3 -m evalplus.evaluate \
 	    --model "$$MODEL" --dataset humaneval --backend openai \
-	    --base_url http://localhost:8081/swarm/api/v1 \
+	    --base_url http://localhost:8081/peerfoundry/api/v1 \
 	    --openai_api_key "$$CONSUMER_KEY" --greedy
 
 .PHONY: eval-mbpp
-eval-mbpp: check-env ## Run MBPP+ pass@1 against the swarm
+eval-mbpp: check-env ## Run MBPP+ pass@1 against the peerfoundry
 	@CONSUMER_KEY=$$(grep ^CONSUMER_KEY $(ENV_FILE) | cut -d= -f2); \
-	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/swarm/api/v1/models \
+	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/peerfoundry/api/v1/models \
 	    | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print(d[0]['id'] if d else '')" 2>/dev/null); \
 	  if [ -z "$$MODEL" ]; then echo "$(YELLOW)No live agents — connect an agent first.$(RESET)"; exit 1; fi; \
 	  echo "$(CYAN)MBPP+  model=$$MODEL$(RESET)"; \
 	  python3 -m evalplus.evaluate \
 	    --model "$$MODEL" --dataset mbpp --backend openai \
-	    --base_url http://localhost:8081/swarm/api/v1 \
+	    --base_url http://localhost:8081/peerfoundry/api/v1 \
 	    --openai_api_key "$$CONSUMER_KEY" --greedy
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -130,19 +130,19 @@ eval-mbpp: check-env ## Run MBPP+ pass@1 against the swarm
 # ─────────────────────────────────────────────────────────────────────────────
 
 .PHONY: opencode-setup
-opencode-setup: ## Install a local OpenCode client and configure Swarm (requires npm)
+opencode-setup: ## Install a local OpenCode client and configure PeerFoundry (requires npm)
 	@python3 scripts/setup-opencode.py --install
 
 .PHONY: opencode
-opencode: ## Run OpenCode with the private Swarm consumer credential
+opencode: ## Run OpenCode with the private PeerFoundry consumer credential
 	@python3 scripts/run-opencode.py
 
 .PHONY: harnesses
-harnesses: check-env ## Install swarm-goose + swarm-aider wrappers (run once, then use from any directory)
+harnesses: check-env ## Install peerfoundry-goose + peerfoundry-aider wrappers (run once, then use from any directory)
 	@python3 scripts/install_harnesses.py
 
 .PHONY: goose-setup
-goose-setup: check-env ## Install Goose CLI and configure it to point at the swarm
+goose-setup: check-env ## Install Goose CLI and configure it to point at the peerfoundry
 	@command -v goose >/dev/null 2>&1 \
 	  && echo "goose already installed at $$(command -v goose)" \
 	  || (echo "$(CYAN)Downloading goose v1.51.0...$(RESET)" && \
@@ -160,11 +160,11 @@ goose-setup: check-env ## Install Goose CLI and configure it to point at the swa
 	@echo ""
 
 .PHONY: goose
-goose: check-env ## Launch an interactive Goose session against the swarm
+goose: check-env ## Launch an interactive Goose session against the peerfoundry
 	@CONSUMER_KEY=$$(grep ^CONSUMER_KEY $(ENV_FILE) | cut -d= -f2); \
-	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/swarm/api/v1/models \
+	  MODEL=$$(curl -sf -H "X-API-Key: $$CONSUMER_KEY" http://localhost:8081/peerfoundry/api/v1/models \
 	    | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print(d[0]['id'] if d else 'qwen3:14b')" 2>/dev/null); \
-	  OPENAI_BASE_URL=$(SWARM_API)/v1 \
+	  OPENAI_BASE_URL=$(PEERFOUNDRY_API)/v1 \
 	  OPENAI_API_KEY=$$CONSUMER_KEY \
 	  GOOSE_PROVIDER=openai \
 	  GOOSE_MODEL=$$MODEL \
@@ -182,12 +182,12 @@ ping: check-env ## Quick smoke-test: all three keys work
 	      || echo "  $(YELLOW)FAIL$(RESET) $$1 → HTTP $$S (expected $$4)"; \
 	  }; \
 	  echo ""; \
-	  check "ADMIN_KEY    /machines  " "$$ADMIN" http://localhost:8081/swarm/api/machines         200; \
-	  check "AGENT_KEY    /register  " "$$AGENT" http://localhost:8081/swarm/api/machines         401; \
-	  check "CONSUMER_KEY /machines  " "$$CONS"  http://localhost:8081/swarm/api/machines         401; \
-	  check "CONSUMER_KEY /v1/models " "$$CONS"  http://localhost:8081/swarm/api/v1/models        200; \
-	  check "AGENT_KEY    /v1/models " "$$AGENT" http://localhost:8081/swarm/api/v1/models        401; \
-	  check "no key       /healthz   " ""        http://localhost:8081/swarm/api/healthz          200; \
+	  check "ADMIN_KEY    /machines  " "$$ADMIN" http://localhost:8081/peerfoundry/api/machines         200; \
+	  check "AGENT_KEY    /register  " "$$AGENT" http://localhost:8081/peerfoundry/api/machines         401; \
+	  check "CONSUMER_KEY /machines  " "$$CONS"  http://localhost:8081/peerfoundry/api/machines         401; \
+	  check "CONSUMER_KEY /v1/models " "$$CONS"  http://localhost:8081/peerfoundry/api/v1/models        200; \
+	  check "AGENT_KEY    /v1/models " "$$AGENT" http://localhost:8081/peerfoundry/api/v1/models        401; \
+	  check "no key       /healthz   " ""        http://localhost:8081/peerfoundry/api/healthz          200; \
 	  echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,11 +200,11 @@ agent-cmd: check-env ## Print the PowerShell one-liner to run on a Windows machi
 	  echo ""; \
 	  echo "$(CYAN)Run this in cmd.exe on the target machine (interactive wizard):$(RESET)"; \
 	  echo ""; \
-	  echo "  powershell -ExecutionPolicy Bypass -c \"iwr '$(SWARM_ROOT)/agent/agent.ps1' | iex\""; \
+	  echo "  powershell -ExecutionPolicy Bypass -c \"iwr '$(PEERFOUNDRY_ROOT)/agent/agent.ps1' | iex\""; \
 	  echo ""; \
 	  echo "$(CYAN)Or non-interactive with explicit params:$(RESET)"; \
 	  echo ""; \
-	  echo "  .\\agent.ps1 -Coordinator $(SWARM_API) -ApiKey $$AGENT_KEY -Model qwen2.5-coder:1.5b"
+	  echo "  .\\agent.ps1 -Coordinator $(PEERFOUNDRY_API) -ApiKey $$AGENT_KEY -Model qwen2.5-coder:1.5b"
 
 .PHONY: agent-build
 agent-build: ## Rebuild agent-standalone.cmd from agent.ps1 (single distributable file)
@@ -246,7 +246,7 @@ clean: down ## Stop stack and remove Docker volumes
 
 .PHONY: clean-all
 clean-all: clean ## Also remove built images
-	docker rmi swarm-llm-coordinator swarm-llm-ui 2>/dev/null || true
+	docker rmi peerfoundry-coordinator peerfoundry-ui 2>/dev/null || true
 	@echo "$(GREEN)Images removed.$(RESET)"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ clean-all: clean ## Also remove built images
 .PHONY: help
 help: ## Show this help
 	@echo ""
-	@echo "  $(BOLD)swarm-llm$(RESET) — distributed LLM swarm control plane"
+	@echo "  $(BOLD)PeerFoundry$(RESET) — distributed LLM peerfoundry control plane"
 	@echo ""
 	@awk 'BEGIN {FS = ":.*##"} \
 	  /^## / { printf "\n  $(CYAN)%s$(RESET)\n", substr($$0,4) } \

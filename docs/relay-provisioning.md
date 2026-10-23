@@ -45,12 +45,12 @@ network; the service must be reachable from the coordinator but not public.
 
 ```sh
 docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'
-python3 scripts/configure-relay-provisioner.py --bind 172.17.0.1
-python3 scripts/configure-relay-provisioner.py --bind 172.17.0.1 --apply
+python3 scripts/configure-relay-provisioner.py --bind <docker-bridge-gateway>
+python3 scripts/configure-relay-provisioner.py --bind <docker-bridge-gateway> --apply
 # Review/install the generated unit as a host operator:
-sudo install -m 0644 .rpc-trial/relay-provisioner/swarm-relay-provisioner.service /etc/systemd/system/
+sudo install -m 0644 .rpc-trial/relay-provisioner/peerfoundry-relay-provisioner.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now swarm-relay-provisioner
+sudo systemctl enable --now peerfoundry-relay-provisioner
 # Deploy the coordinator after existing work drains.
 ```
 
@@ -67,7 +67,7 @@ To disable and clean up after work finishes:
 ```sh
 python3 scripts/configure-relay.py --disable --apply
 # Deploy the cleared coordinator configuration after draining work.
-sudo systemctl disable --now swarm-relay-provisioner
+sudo systemctl disable --now peerfoundry-relay-provisioner
 terraform -chdir=infra/relay destroy
 ```
 

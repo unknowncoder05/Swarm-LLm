@@ -32,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--status", action="store_true", help="Read status without queuing inference")
     parser.add_argument("--watch", action="store_true", help="Watch compact RPC progress every 30 seconds without queuing work")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8081/swarm/api")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8081/peerfoundry/api")
     parser.add_argument("--wait-seconds", type=int, default=360)
     parser.add_argument("--transport", choices=("direct", "relay", "quic", "auto"), default="direct")
     parser.add_argument("--context", type=int, default=2048)

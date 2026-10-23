@@ -1,13 +1,13 @@
 [Unit]
-Description=Swarm LLM container worker
+Description=PeerFoundry container worker
 After=docker.service network-online.target
 Requires=docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/swarm-container-agent.env
-ExecStart=/usr/bin/python3 /opt/swarm-llm/container_agent.py --coordinator https://swarm.example.com/swarm/api
+EnvironmentFile=/etc/peerfoundry-container-agent.env
+ExecStart=/usr/bin/python3 /opt/peerfoundry/container_agent.py --coordinator https://peerfoundry.example.com/peerfoundry/api
 Restart=always
 RestartSec=5
 

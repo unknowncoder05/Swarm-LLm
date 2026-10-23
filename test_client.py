@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swarm-llm test client
+peerfoundry test client
 ─────────────────────
 Polls until at least one machine is registered, then fires a coding prompt
 and streams the response. Verifies the full pipeline end-to-end.
@@ -75,7 +75,7 @@ def api_post_stream(path: str, body: dict, key: str):
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("\n  swarm-llm test client")
+    print("\n  PeerFoundry test client")
     print("  ─────────────────────")
 
     # 1. Verify coordinator is up

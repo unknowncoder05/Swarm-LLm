@@ -83,7 +83,7 @@ terraform -chdir=infra/relay output deployment
 Wait for cloud-init, the relay service, DNS, and the public ACME certificate.
 The expected endpoint is `https://relay.example.com/healthz`.
 Inspect failures through SSM and `/var/log/cloud-init-output.log`,
-`journalctl -u swarm-relay -u caddy`, and `systemctl list-timers`.
+`journalctl -u peerfoundry-relay -u caddy`, and `systemctl list-timers`.
 
 ## Connect and verify
 

@@ -1,6 +1,6 @@
 # Distributed inference
 
-Swarm supports two different ways to use several machines:
+PeerFoundry supports two different ways to use several machines:
 
 - Ordinary Ollama jobs are pulled by independent agents. Each machine loads its
   own model; this increases request capacity.
@@ -94,7 +94,7 @@ model is a separate requirement. The estimates do not account for exact
 quantization, free GPU memory, KV cache, or other applications using the GPU.
 Adding a larger model requires extending `_RPC_MODELS`, preparing its GGUF, and
 checking that context and device buffers fit. There is no general RAM-pooling
-feature in the Swarm scheduler.
+feature in the PeerFoundry scheduler.
 
 ## Network and machine requirements
 
@@ -132,7 +132,7 @@ feature in the Swarm scheduler.
   otherwise. An explicit request overrides the default for new clusters.
   See [route policy and recovery](relay-routing.md).
 - Keep RPC inside a protected network. Upstream describes RPC as experimental
-  and warns against open-network exposure. The Swarm API keys do not authenticate
+  and warns against open-network exposure. The PeerFoundry API keys do not authenticate
   the llama.cpp RPC transport.
 - Use matching llama.cpp revisions compiled with `GGML_RPC=ON` and an appropriate
   accelerator backend on every node. Current upstream calls the RPC executable
@@ -186,7 +186,7 @@ The Python agent automatically joins coordinator-assigned clusters. The separate
 worker addresses. Ordinary `agent.ps1` does not implement automatic RPC roles.
 
 The reviewed `agents/` sources are included in this repository. The public
-`/swarm/agent/agent.py` download and authenticated `/agent/agent.py` route serve
+`/peerfoundry/agent/agent.py` download and authenticated `/agent/agent.py` route serve
 the same read-only mounted source. Missing configured source returns 503.
 Operators without that mount may explicitly configure `AGENT_SOURCE_URL`.
 The AWS lab keeps its separate captured source and adapters.

@@ -40,7 +40,7 @@ def verify_cluster(state, model, expected=2):
 
 
 def main():
-    config = json.loads(Path("/opt/swarm/config.json").read_text())
+    config = json.loads(Path("/opt/peerfoundry/config.json").read_text())
     keys = json.loads(subprocess.check_output([
         "aws", "ssm", "get-parameter", "--region", config["region"],
         "--name", config["key_parameter"], "--with-decryption",

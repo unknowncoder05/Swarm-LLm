@@ -18,21 +18,34 @@ class OpenCodeConfigTests(unittest.TestCase):
         self.assertEqual(self.config.choose_model([], "qwen3:30b-a3b"), "qwen3:30b-a3b")
         self.assertEqual(self.config.choose_model([]), "qwen2.5-coder:1.5b")
 
+    def test_legacy_provider_migrates_without_losing_profiles_or_other_providers(self):
+        original = {"model": "swarm-llm/custom", "enabled_providers": ["swarm-llm"],
+            "provider": {"other": {"name": "Other"}, "swarm-llm": {
+                "models": {"custom": {"limit": {"context": 8192}}},
+                "options": {"baseURL": "{env:SWARM_BASE_URL}"}}}}
+        migrated = self.config.migrate_legacy_config(original)
+        self.assertEqual(migrated["model"], "peerfoundry/custom")
+        self.assertEqual(migrated["enabled_providers"], ["peerfoundry"])
+        self.assertEqual(migrated["provider"]["peerfoundry"]["models"]["custom"]["limit"]["context"], 8192)
+        self.assertEqual(migrated["provider"]["peerfoundry"]["options"]["baseURL"], self.config.BASE_URL_ENV)
+        self.assertEqual(migrated["provider"]["other"], original["provider"]["other"])
+        self.assertIn("swarm-llm", original["provider"])
+
     def test_metadata_and_wire_context_agree_without_disabling_reasoning(self):
         config = self.config.build_config("qwen3:30b-a3b")
-        provider = config["provider"]["swarm-llm"]
+        provider = config["provider"]["peerfoundry"]
         model = provider["models"]["qwen3:30b-a3b"]
-        self.assertEqual(config["model"], "swarm-llm/qwen3:30b-a3b")
+        self.assertEqual(config["model"], "peerfoundry/qwen3:30b-a3b")
         self.assertEqual(config["small_model"], config["model"])
         self.assertEqual(model["limit"]["context"], 32768)
         self.assertEqual(model["options"]["options"]["num_ctx"], 32768)
         self.assertNotIn("think", model["options"]["options"])
-        self.assertEqual(provider["options"]["apiKey"], "{env:SWARM_CONSUMER_KEY}")
+        self.assertEqual(provider["options"]["apiKey"], "{env:PEERFOUNDRY_CONSUMER_KEY}")
         self.assertGreater(provider["options"]["headerTimeout"], 3600000)
 
     def test_context_override_and_native_limit(self):
         config = self.config.build_config("qwen3:30b-a3b", context=16384)
-        model = config["provider"]["swarm-llm"]["models"]["qwen3:30b-a3b"]
+        model = config["provider"]["peerfoundry"]["models"]["qwen3:30b-a3b"]
         self.assertEqual(model["limit"]["context"], 16384)
         self.assertEqual(model["options"]["options"]["num_ctx"], 16384)
         for context in (True, 511, 32769, 32768.0):
@@ -41,10 +54,10 @@ class OpenCodeConfigTests(unittest.TestCase):
 
     def test_saved_qwen_default_and_selectable_models_send_their_advertised_context(self):
         saved = json.loads((ROOT / "opencode.json").read_text())
-        self.assertEqual(saved["model"], "swarm-llm/qwen3:14b")
+        self.assertEqual(saved["model"], "peerfoundry/qwen3:14b")
         self.assertEqual(saved["small_model"], saved["model"])
         self.assertEqual(saved["agent"]["title"]["model"], saved["model"])
-        provider = saved["provider"]["swarm-llm"]
+        provider = saved["provider"]["peerfoundry"]
         for name in ("qwen3:14b", "qwen3:8b", "devstral-small-2:24b"):
             profile = provider["models"][name]
             self.assertIn(name, provider["whitelist"])
@@ -53,7 +66,7 @@ class OpenCodeConfigTests(unittest.TestCase):
 
     def test_launcher_corrects_stale_pwd_and_forwards_the_requested_directory(self):
         launcher = load("opencode_launcher", ROOT / "scripts/run-opencode.py")
-        with patch.dict(launcher.os.environ, {"SWARM_CONSUMER_KEY": "test-consumer", "PWD": "/old/project"}), \
+        with patch.dict(launcher.os.environ, {"PEERFOUNDRY_CONSUMER_KEY": "test-consumer", "PWD": "/old/project"}), \
              patch.object(launcher.shutil, "which", return_value="/bin/opencode"), \
              patch.object(launcher.os, "getcwd", return_value="/tmp/current-project"), \
              patch.object(launcher.sys, "argv", ["run-opencode.py", "run", "--dir", "/tmp/fixture", "hi"]), \
@@ -62,7 +75,7 @@ class OpenCodeConfigTests(unittest.TestCase):
         binary, argv, env = execute.call_args.args
         self.assertEqual(argv, [binary, "run", "--dir", "/tmp/fixture", "hi"])
         self.assertEqual(env["PWD"], "/tmp/current-project")
-        self.assertEqual(env["SWARM_CONSUMER_KEY"], "test-consumer")
+        self.assertEqual(env["PEERFOUNDRY_CONSUMER_KEY"], "test-consumer")
 
     def test_launcher_resolves_windows_npm_shim_to_native_executable(self):
         launcher = load("opencode_windows_launcher", ROOT / "scripts/run-opencode.py")
@@ -72,7 +85,7 @@ class OpenCodeConfigTests(unittest.TestCase):
             native.parent.mkdir(parents=True)
             native.write_bytes(b"test executable")
             with patch.object(launcher, "ROOT", root), \
-                 patch.dict(launcher.os.environ, {"SWARM_CONSUMER_KEY": "test-consumer"}), \
+                 patch.dict(launcher.os.environ, {"PEERFOUNDRY_CONSUMER_KEY": "test-consumer"}), \
                  patch.object(launcher.shutil, "which", return_value=str(root / "opencode.cmd")), \
                  patch.object(launcher.sys, "argv", ["run-opencode.py", "--version"]), \
                  patch.object(launcher.os, "execve") as execute:

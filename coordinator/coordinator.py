@@ -1,5 +1,5 @@
 """
-swarm-llm coordinator
+peerfoundry coordinator
 ─────────────────────
 Endpoints and required key:
   GET  /healthz                    — no auth (uptime probes)
@@ -826,7 +826,7 @@ def _release_media_slot(job_id: str) -> None:
 
 # ── app ───────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="swarm-llm coordinator", docs_url=None, redoc_url=None)
+app = FastAPI(title="PeerFoundry coordinator", docs_url=None, redoc_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1607,7 +1607,7 @@ async def list_models(_key: str = Depends(require_consumer)):
         if m.alive and not m.in_rpc and _can_serve_single(m, m.model) and m.model not in seen:
             seen[m.model] = {
                 "id": m.model, "object": "model",
-                "created": int(m.registered_at), "owned_by": "swarm-llm",
+                "created": int(m.registered_at), "owned_by": "peerfoundry",
             }
     # Include RPC models that have enough idle GPU capacity to form a cluster
     for rpc_model, req_vram in {**_RPC_MODELS, **RPC_FALLBACK_MODELS}.items():
@@ -1617,7 +1617,7 @@ async def list_models(_key: str = Depends(require_consumer)):
             if _select_rpc_machines(req_vram) or _find_rpc_cluster_for_model(rpc_model):
                 seen[rpc_model] = {
                     "id": rpc_model, "object": "model",
-                    "created": int(time.time()), "owned_by": "swarm-llm-rpc",
+                    "created": int(time.time()), "owned_by": "peerfoundry-rpc",
                 }
     # Advertise only bounded on-demand models that at least one live worker can
     # actually load. The first request creates the queue observed by workers.
@@ -1625,7 +1625,7 @@ async def list_models(_key: str = Depends(require_consumer)):
         if model not in seen and _on_demand_capacity(model):
             seen[model] = {
                 "id": model, "object": "model",
-                "created": int(time.time()), "owned_by": "swarm-llm-on-demand",
+                "created": int(time.time()), "owned_by": "peerfoundry-on-demand",
             }
     return {"object": "list", "data": list(seen.values())}
 
@@ -1689,14 +1689,7 @@ def _finalize_chat_response(job, user_id, t_start):
         _log_usage(requested_model, user_id, 0, 0, job.elapsed_ms, False,
                    finish_reason="error",
                    hostname=machine.hostname if machine else None)
-        print(f"[job {job.id[:8]}] ERROR: {job.error[:300]}")
-        msgs = job.body.get("messages", [])
-        print(f"[job {job.id[:8]}] DEBUG body_keys={list(job.body.keys())} msgs={len(msgs)}")
-        for i, m in enumerate(msgs[-3:], start=max(0, len(msgs)-3)):
-            role = m.get("role")
-            tc   = m.get("tool_calls")
-            args_type = type((((tc or [{}])[0] or {}).get("function") or {}).get("arguments")).__name__ if tc else "-"
-            print(f"[job {job.id[:8]}] DEBUG msg[{i}] role={role} keys={list(m.keys())} args_type={args_type}")
+        print(f"[job {job.id[:8]}] upstream request failed | status={job.upstream_status}")
         status = job.upstream_status if job.upstream_status in (400, 413, 422) else 502
         raise HTTPException(status, f"Upstream error: {job.error[:300]}")
 
@@ -1746,6 +1739,36 @@ def _finalize_chat_response(job, user_id, t_start):
     return result
 
 
+def _estimated_context_need(messages: list[dict]) -> int:
+    char_count = sum(len(str(message.get("content", ""))) for message in messages)
+    return char_count // 3 + 8192  # code-aware prompt estimate plus response/tool reserve
+
+
+def _automatic_context_size(model: str, messages: list[dict]) -> int:
+    """Choose a bounded model- and capacity-aware context before placement."""
+    estimated_tokens = max(0, _estimated_context_need(messages) - 8192)
+    model_lower = model.lower()
+    if any(size in model_lower for size in ("24b", "27b", "30b", "32b")):
+        context_floor, context_cap = 8192, 32768
+    elif "14b" in model_lower:
+        context_floor, context_cap = 16384, 32768
+    else:
+        context_floor, context_cap = 49152, 65536
+    # Native RPC startup uses stable power-of-two context tiers. Preserve the
+    # model's proven default for ordinary prompts, then move to the next tier
+    # when prompt tokens plus an 8K response/tool reserve no longer fit.
+    if model in _RPC_MODELS or model in RPC_FALLBACK_MODELS:
+        context_floor = max(context_floor, _RPC_DEFAULT_CONTEXT.get(model, 0))
+        if model in RPC_FALLBACK_MODELS and estimated_tokens + 8192 <= 16384 and any(
+                machine.alive and not machine.in_rpc
+                and _can_serve_single(machine, model, 16384)
+                for machine in machines.values()):
+            context_floor = 16384
+        desired = max(context_floor, estimated_tokens + 8192)
+        return next((tier for tier in (8192, 16384, 32768) if tier >= desired), context_cap)
+    return max(context_floor, min(context_cap, estimated_tokens + 16384))
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request, _key: str = Depends(require_consumer)):
     _ip = _real_ip(request)
@@ -1766,6 +1789,9 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
                 or body.get("rpc_transport") != "quic" or not body.get("rpc_agent_ids")):
             raise HTTPException(422, "RPC tuning requires an explicitly pinned QUIC pair")
     explicit_context = "num_ctx" in body["options"]
+    if not explicit_context:
+        body["options"]["num_ctx"] = _automatic_context_size(
+            requested_model, body.get("messages", []))
     _check_chat_queue_capacity(requested_model, _chat_payload_bytes(body))
     created_cluster = None
 
@@ -1798,6 +1824,9 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
                                 headers={"Retry-After": "30"})
         options = body.setdefault("options", {})
         ctx_size = options.get("num_ctx", cluster.ctx_size if cluster else _RPC_DEFAULT_CONTEXT.get(requested_model, 4096))
+        if (cluster and not explicit_context
+                and _estimated_context_need(body.get("messages", [])) <= cluster.ctx_size):
+            ctx_size = cluster.ctx_size
         if type(ctx_size) is not int or not 512 <= ctx_size <= 32768:
             raise HTTPException(422, "RPC num_ctx must be an integer between 512 and 32768")
         if cluster and ctx_size > cluster.ctx_size:
@@ -1882,22 +1911,6 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
     # Output caps have already been normalized into options.num_predict.
     body.pop("max_tokens", None)
 
-    # Estimate a desired window, then bound automatic single-device contexts by
-    # the eligible hardware policy. Explicit client windows are never reduced.
-    if "num_ctx" not in body.get("options", {}):
-        msgs = body.get("messages", [])
-        char_count = sum(len(str(m.get("content", ""))) for m in msgs)
-        estimated_tokens = char_count // 3  # code-aware: ~3 chars/token
-        model_lower = requested_model.lower()
-        if any(x in model_lower for x in ["24b", "27b", "30b", "32b"]):
-            ctx_floor, ctx_cap = 8192,  32768
-        elif "14b" in model_lower:
-            ctx_floor, ctx_cap = 16384, 32768
-        else:
-            ctx_floor, ctx_cap = 49152, 65536
-        ctx = max(ctx_floor, min(ctx_cap, estimated_tokens + 16384))
-        body.setdefault("options", {})["num_ctx"] = ctx
-
     if not _rpc_vram_needed:
         context = body["options"]["num_ctx"]
         if type(context) is not int or not 512 <= context <= 65536:
@@ -1967,13 +1980,8 @@ async def chat_completions(request: Request, _key: str = Depends(require_consume
         job_queues[job.model] = asyncio.Queue()
     await job_queues[job.model].put(job)
 
-    # Log the last user message so requests are traceable in logs
-    messages = body.get("messages", [])
-    last_user = next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), "")
-    if not isinstance(last_user, str):
-        last_user = json.dumps(last_user, ensure_ascii=False)
-    preview = last_user[:120].replace("\n", " ")
-    print(f"[job {job.id[:8]}] queued | {requested_model} | {preview!r}")
+    # Trace admission without putting student prompts or tool content in logs.
+    print(f"[job {job.id[:8]}] queued | {requested_model}")
 
     t_start = time.time()
     if job.live_stream is not None:
@@ -2088,7 +2096,7 @@ async def generate_image(request: Request, payload: ImageGenerationRequest, _key
             with open(fp, "rb") as fh:
                 data.append({"b64_json": base64.b64encode(fh.read()).decode()})
         else:
-            data.append({"url": f"/swarm/api/v1/images/files/{os.path.basename(fp)}"})
+            data.append({"url": f"/peerfoundry/api/v1/images/files/{os.path.basename(fp)}"})
 
     elapsed_s = round(time.time() - t_start, 1)
     print(f"[img {job.id[:8]}] done {elapsed_s}s — {len(data)} image(s)")
@@ -2104,7 +2112,7 @@ async def get_image_job_status(job_id: str, _key: str = Depends(require_consumer
     if job.status == "processing" and job.progress:
         resp["progress"] = job.progress
     if job.status == "completed":
-        resp["data"] = [{"url": f"/swarm/api/v1/images/files/{os.path.basename(fp)}"} for fp in job.file_paths]
+        resp["data"] = [{"url": f"/peerfoundry/api/v1/images/files/{os.path.basename(fp)}"} for fp in job.file_paths]
     if job.status == "failed" and job.error:
         resp["error"] = job.error
     return JSONResponse(resp)
@@ -2194,7 +2202,7 @@ async def get_video_job_status(job_id: str, _key: str = Depends(require_consumer
     if job.status == "processing" and job.progress:
         resp["progress"] = job.progress
     if job.status == "completed" and job.file_path:
-        resp["url"] = f"/swarm/api/v1/video/files/{os.path.basename(job.file_path)}"
+        resp["url"] = f"/peerfoundry/api/v1/video/files/{os.path.basename(job.file_path)}"
     if job.status == "failed" and job.error:
         resp["error"] = job.error
     return JSONResponse(resp)
@@ -2472,7 +2480,7 @@ async def list_media_jobs(limit: int = 100, _key: str = Depends(require_admin)):
             "elapsed_ms": job.elapsed_ms,
             "error":      job.error,
             "progress":   job.progress,
-            "url":        f"/swarm/api/v1/images/files/{os.path.basename(job.file_paths[0])}" if job.file_paths else None,
+            "url":        f"/peerfoundry/api/v1/images/files/{os.path.basename(job.file_paths[0])}" if job.file_paths else None,
         })
     for job in video_jobs.values():
         result.append({
@@ -2485,7 +2493,7 @@ async def list_media_jobs(limit: int = 100, _key: str = Depends(require_admin)):
             "elapsed_ms": job.elapsed_ms,
             "error":      job.error,
             "progress":   job.progress,
-            "url":        f"/swarm/api/v1/video/files/{os.path.basename(job.file_path)}" if job.file_path else None,
+            "url":        f"/peerfoundry/api/v1/video/files/{os.path.basename(job.file_path)}" if job.file_path else None,
         })
     result.sort(key=lambda x: x["created"], reverse=True)
     return {"jobs": result[:limit]}

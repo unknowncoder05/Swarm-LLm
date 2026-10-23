@@ -1,14 +1,14 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "swarm-llm/qwen3:14b",
-  "small_model": "swarm-llm/qwen3:14b",
+  "model": "peerfoundry/qwen3:14b",
+  "small_model": "peerfoundry/qwen3:14b",
   "provider": {
-    "swarm-llm": {
+    "peerfoundry": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Swarm LLM",
+      "name": "PeerFoundry",
       "options": {
-        "baseURL": "{env:SWARM_BASE_URL}",
-        "apiKey": "{env:SWARM_CONSUMER_KEY}",
+        "baseURL": "{env:PEERFOUNDRY_BASE_URL}",
+        "apiKey": "{env:PEERFOUNDRY_CONSUMER_KEY}",
         "timeout": 3700000,
         "headerTimeout": 3700000,
         "chunkTimeout": 3700000
@@ -183,7 +183,7 @@
   },
   "agent": {
     "title": {
-      "model": "swarm-llm/qwen3:14b"
+      "model": "peerfoundry/qwen3:14b"
     }
   }
 }

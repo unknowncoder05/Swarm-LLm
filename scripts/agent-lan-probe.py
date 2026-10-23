@@ -36,7 +36,7 @@ def main():
             name, value = line.split("=", 1)
             values.setdefault(name.strip(), value.strip().strip("\"'"))
     def state():
-        request = urllib.request.Request("http://127.0.0.1:8081/swarm/api/machines",
+        request = urllib.request.Request("http://127.0.0.1:8081/peerfoundry/api/machines",
                                          headers={"X-API-Key": values["ADMIN_KEY"]})
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)

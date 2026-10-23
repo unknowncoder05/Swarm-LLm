@@ -57,6 +57,8 @@ def _real_ip(request: Request) -> str:
 
 class ApiKeyAuth:
     def __init__(self, admin_key, agent_key, consumer_key):
+        if not all((admin_key, agent_key, consumer_key)) or len({admin_key, agent_key, consumer_key}) != 3:
+            raise ValueError("Admin, agent and consumer keys must be non-empty and distinct")
         self.admin_key = admin_key
         self.agent_key = agent_key
         self.consumer_key = consumer_key

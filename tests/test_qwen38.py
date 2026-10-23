@@ -63,7 +63,7 @@ class Qwen38WorkerTests(unittest.TestCase):
         self.assertEqual(agent._MODEL_CATALOG[agent.recommended_model_index(0)]["id"], "qwen2.5-coder:1.5b")
         self.assertNotEqual(agent._MODEL_CATALOG[agent.recommended_model_index(12)]["id"], MODEL)
         config = load("qwen38_client", ROOT / "scripts/gen_opencode_config.py").build_config(MODEL)
-        profile = config["provider"]["swarm-llm"]["models"][MODEL]
+        profile = config["provider"]["peerfoundry"]["models"][MODEL]
         self.assertTrue(profile["reasoning"])
         self.assertTrue(profile["tool_call"])
         self.assertEqual(profile["options"]["options"]["num_ctx"], profile["limit"]["context"])

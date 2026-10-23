@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set up this checkout's OpenCode client for Swarm (no administrator needed)."""
+"""Set up this checkout's OpenCode client for PeerFoundry (no administrator needed)."""
 import argparse
 import getpass
 import importlib.util
@@ -14,9 +14,9 @@ import urllib.request
 from pathlib import Path
 
 try:
-    from gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, save_client_settings, update_config, write_private
+    from gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, migrate_legacy_config, save_client_settings, update_config, write_private
 except ModuleNotFoundError:
-    from scripts.gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, save_client_settings, update_config, write_private
+    from scripts.gen_opencode_config import BASE_URL_ENV, build_config, load_base_url, load_consumer_key, merge_config, migrate_legacy_config, save_client_settings, update_config, write_private
 
 ROOT = Path(__file__).resolve().parents[1]
 # Match the CLI used for the repository's integration checks.
@@ -50,21 +50,21 @@ def check_connection(base_url, key):
         return list(dict.fromkeys(m["id"] for m in models))
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
-            raise ValueError("Swarm rejected the consumer credential (HTTP %s)" % exc.code) from None
-        raise ValueError("Swarm model discovery failed (HTTP %s); check the API base URL" % exc.code) from None
+            raise ValueError("PeerFoundry rejected the consumer credential (HTTP %s)" % exc.code) from None
+        raise ValueError("PeerFoundry model discovery failed (HTTP %s); check the API base URL" % exc.code) from None
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        raise ValueError("Cannot read Swarm's model catalog; check connectivity and the API base URL") from None
+        raise ValueError("Cannot read PeerFoundry's model catalog; check connectivity and the API base URL") from None
 
 
 def load_launcher():
-    spec = importlib.util.spec_from_file_location("swarm_opencode_launcher", ROOT / "scripts/run-opencode.py")
+    spec = importlib.util.spec_from_file_location("peerfoundry_opencode_launcher", ROOT / "scripts/run-opencode.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def show_models(advertised):
-    print("Models currently advertised by Swarm (may load on first request):")
+    print("Models currently advertised by PeerFoundry (may load on first request):")
     for index, name in enumerate(advertised, 1):
         print("  %s. %s" % (index, name))
     if not advertised:
@@ -87,9 +87,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", action="store_true", help="Install pinned OpenCode locally using npm")
     parser.add_argument("--model", help="Select a model without the interactive picker")
-    parser.add_argument("--title-model", help="Use a separate advertised Swarm model for session titles only")
+    parser.add_argument("--title-model", help="Use a separate advertised PeerFoundry model for session titles only")
     parser.add_argument("--context", type=int, choices=range(512, 32769), metavar="512..32768")
-    parser.add_argument("--base-url", help="Swarm OpenAI-compatible URL, including /v1")
+    parser.add_argument("--base-url", help="PeerFoundry OpenAI-compatible URL, including /v1")
     parser.add_argument("--list-models", action="store_true", help="Show the live catalog without changing config or loading a model")
     parser.add_argument("--offline", action="store_true", help="Skip the authenticated API check")
     args = parser.parse_args(argv)
@@ -98,30 +98,30 @@ def main(argv=None):
         parser.error("opencode.jsonc exists; consolidate it into opencode.json before running setup")
     # Validate existing configuration before installing or saving anything.
     try:
-        from_config = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
+        from_config = migrate_legacy_config(json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {})
         if not isinstance(from_config, dict):
             raise ValueError()
     except (OSError, ValueError):
         parser.error("Existing opencode.json must be valid JSON; it has been left untouched")
     try:
-        saved_provider = from_config.get("provider", {}).get("swarm-llm", {})
+        saved_provider = from_config.get("provider", {}).get("peerfoundry", {})
         saved_url = saved_provider.get("options", {}).get("baseURL", "")
         if saved_url == BASE_URL_ENV:
             saved_url = ""
         saved_url = load_base_url(ROOT, default=saved_url)
-        base_url = args.base_url or os.environ.get("SWARM_BASE_URL")
+        base_url = args.base_url or os.environ.get("PEERFOUNDRY_BASE_URL")
         if not base_url and sys.stdin.isatty():
-            base_url = input("Swarm API base URL%s: " % (" [%s]" % saved_url if saved_url else "")).strip() or saved_url
+            base_url = input("PeerFoundry API base URL%s: " % (" [%s]" % saved_url if saved_url else "")).strip() or saved_url
         base_url = validate_base_url(base_url or saved_url)
         key = load_consumer_key(ROOT)
     except (OSError, ValueError, AttributeError):
-        parser.error("Provide --base-url https://your-host/swarm/api/v1 (or SWARM_BASE_URL) and valid client settings")
+        parser.error("Provide --base-url https://your-host/peerfoundry/api/v1 (or PEERFOUNDRY_BASE_URL) and valid client settings")
     prompted = False
     if not key and sys.stdin.isatty():
-        key = getpass.getpass("Swarm consumer key (saved in ignored .env.opencode): ").strip()
+        key = getpass.getpass("PeerFoundry consumer key (saved in ignored .env.opencode): ").strip()
         prompted = True
     if not key or any(c in key for c in "\r\n\x00"):
-        parser.error("Set SWARM_CONSUMER_KEY or add it to .env.opencode, then retry")
+        parser.error("Set PEERFOUNDRY_CONSUMER_KEY or add it to .env.opencode, then retry")
     if args.offline and args.list_models:
         parser.error("--list-models requires an online catalog check")
     advertised = None
@@ -130,14 +130,14 @@ def main(argv=None):
             advertised = check_connection(base_url, key)
         except ValueError as exc:
             parser.error(str(exc))
-        print("Authenticated Swarm API check passed.")
+        print("Authenticated PeerFoundry API check passed.")
         show_models(advertised)
         if args.list_models:
             return 0
     else:
         print("Offline setup: API connectivity and credential were not verified.")
     previous_model = from_config.get("model", "")
-    default = previous_model[len("swarm-llm/"):] if previous_model.startswith("swarm-llm/") else "qwen3:30b-a3b"
+    default = previous_model[len("peerfoundry/"):] if previous_model.startswith("peerfoundry/") else "qwen3:30b-a3b"
     model = args.model or (select_model(advertised, default)
                           if advertised and sys.stdin.isatty() else default)
     if args.title_model and advertised is not None and args.title_model not in advertised:
@@ -151,12 +151,12 @@ def main(argv=None):
     window = args.context or saved_provider.get("models", {}).get("qwen3:30b-a3b", {}).get("limit", {}).get("context", 32768)
     config = build_config(model, BASE_URL_ENV, window, advertised=names)
     if args.title_model:
-        config["agent"] = {"title": {"model": "swarm-llm/" + args.title_model}}
-    for name, profile in config["provider"]["swarm-llm"]["models"].items():
+        config["agent"] = {"title": {"model": "peerfoundry/" + args.title_model}}
+    for name, profile in config["provider"]["peerfoundry"]["models"].items():
         if name != "qwen3:30b-a3b":
             existing = saved_provider.get("models", {}).get(name, {})
             if isinstance(existing, dict):
-                config["provider"]["swarm-llm"]["models"][name] = merge_config(profile, existing)
+                config["provider"]["peerfoundry"]["models"][name] = merge_config(profile, existing)
     try:
         merge_config(from_config, config)
     except ValueError:
@@ -177,12 +177,12 @@ def main(argv=None):
         save_client_settings(ROOT, base_url, key if prompted else None)
     except (OSError, ValueError) as exc:
         parser.error("Cannot update OpenCode configuration (%s)" % type(exc).__name__)
-    window = config["provider"]["swarm-llm"]["models"][model].get("limit", {}).get("context", "custom")
-    print("OpenCode %s configured: swarm-llm/%s, client context %s." % (version.stdout.strip(), model, window))
+    window = config["provider"]["peerfoundry"]["models"][model].get("limit", {}).get("context", "custom")
+    print("OpenCode %s configured: peerfoundry/%s, client context %s." % (version.stdout.strip(), model, window))
     print("Other providers and project settings were preserved. No cloud resources were created.")
     print('Launch: %s"%s" "%s"' % ("& " if sys.platform == "win32" else "",
                                     sys.executable, ROOT / "scripts/run-opencode.py"))
-    print("In OpenCode use /models to choose a Swarm model, then send a prompt. Swarm loads it on demand.")
+    print("In OpenCode use /models to choose a PeerFoundry model, then send a prompt. PeerFoundry loads it on demand.")
     return 0
 
 
